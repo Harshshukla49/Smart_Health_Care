@@ -1,0 +1,98 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+  font-family: 'Gadugi', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  font-size: 18px;
+  line-height: 1.75;
+  font-weight: 400;
+}
+
+html {
+  scroll-behavior: smooth;
+  font-size: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  font-family: 'Gadugi', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
+  font-size: 1.125rem;
+  line-height: 1.75;
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.32), transparent 30%),
+    radial-gradient(circle at top right, rgba(168, 85, 247, 0.28), transparent 26%),
+    radial-gradient(circle at bottom left, rgba(45, 212, 191, 0.2), transparent 28%),
+    linear-gradient(135deg, #050816 0%, #09111f 45%, #06101c 100%);
+  color: #e2e8f0;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+#root {
+  min-height: 100vh;
+  width: 100%;
+}
+
+::selection {
+  background: rgba(14, 165, 233, 0.35);
+  color: white;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+.font-display {
+  font-family: 'Bodoni MT', 'Bodoni 72', 'Didot', 'Iowan Old Style', 'Times New Roman', serif;
+  letter-spacing: 0.01em;
+}
+
+h1 {
+  font-size: clamp(2.5rem, 4vw, 4.75rem);
+  line-height: 0.96;
+}
+
+h2 {
+  font-size: clamp(2rem, 3vw, 3.25rem);
+  line-height: 1.02;
+}
+
+h3 {
+  font-size: clamp(1.5rem, 2.2vw, 2.2rem);
+  line-height: 1.08;
+}
+
+p,
+li,
+span,
+input,
+textarea,
+select,
+button {
+  font-size: 1rem;
+  line-height: 1.75;
+}
+
+@media (max-width: 768px) {
+  :root {
+    font-size: 16px;
+  }
+
+  body {
+    font-size: 1rem;
+  }
+}
+
+input,
+textarea,
+select,
+button {
+  font: inherit;
+}
