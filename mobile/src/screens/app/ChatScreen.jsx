@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   FlatList,
   Pressable,
   SafeAreaView,
@@ -10,13 +11,6 @@ import {
   View,
 } from 'react-native';
 import { io } from 'socket.io-client';
-import {
-  mediaDevices,
-  RTCIceCandidate,
-  RTCPeerConnection,
-  RTCSessionDescription,
-  RTCView,
-} from 'react-native-webrtc';
 import { useAuth } from '../../context/AuthContext';
 import { API_BASE_URL } from '../../config/env';
 import {
@@ -27,6 +21,23 @@ import {
 } from '../../services/chatService';
 import { getPatients } from '../../services/patientService';
 import { colors } from '../../theme/colors';
+
+const WEBRTC_UNAVAILABLE_MESSAGE = 'Voice/video calling is unavailable in Expo Go. Use a development build or APK to enable WebRTC.';
+
+const webrtcModule = (() => {
+  try {
+    return require('react-native-webrtc');
+  } catch {
+    return null;
+  }
+})();
+
+const mediaDevices = webrtcModule?.mediaDevices;
+const RTCIceCandidate = webrtcModule?.RTCIceCandidate;
+const RTCPeerConnection = webrtcModule?.RTCPeerConnection;
+const RTCSessionDescription = webrtcModule?.RTCSessionDescription;
+const RTCView = webrtcModule?.RTCView;
+const HAS_WEBRTC = Boolean(mediaDevices && RTCIceCandidate && RTCPeerConnection && RTCSessionDescription && RTCView);
 
 const RTC_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }],
@@ -151,6 +162,10 @@ export function ChatScreen() {
   }, [closePeerConnection, contextData?.threadId, resetCallState, stopLocalStream]);
 
   const ensureLocalStream = useCallback(async () => {
+    if (!HAS_WEBRTC) {
+      throw new Error(WEBRTC_UNAVAILABLE_MESSAGE);
+    }
+
     if (localStreamRef.current) {
       return localStreamRef.current;
     }
@@ -542,6 +557,11 @@ export function ChatScreen() {
   };
 
   const requestCall = () => {
+    if (!HAS_WEBRTC) {
+      Alert.alert('Calling unavailable', WEBRTC_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
     if (!contextData?.threadId) {
       return;
     }
@@ -554,6 +574,11 @@ export function ChatScreen() {
   };
 
   const acceptCall = async () => {
+    if (!HAS_WEBRTC) {
+      Alert.alert('Calling unavailable', WEBRTC_UNAVAILABLE_MESSAGE);
+      return;
+    }
+
     if (!incomingCall?.threadId) {
       return;
     }
@@ -650,10 +675,11 @@ export function ChatScreen() {
           <Text style={styles.contextTitle}>{contextData?.partnerName || 'Partner'}</Text>
           <Text style={styles.contextMeta}>Thread: {contextData?.threadId || 'N/A'}</Text>
           {callBanner ? <Text style={styles.callBanner}>{callBanner}</Text> : null}
+          {!HAS_WEBRTC ? <Text style={styles.webrtcNote}>{WEBRTC_UNAVAILABLE_MESSAGE}</Text> : null}
 
           <View style={styles.callActions}>
             {callState !== 'in-call' && callState !== 'connecting' ? (
-              <Pressable style={styles.callButton} onPress={requestCall}>
+              <Pressable style={[styles.callButton, !HAS_WEBRTC ? styles.callButtonDisabled : null]} onPress={requestCall}>
                 <Text style={styles.callButtonText}>Call</Text>
               </Pressable>
             ) : (
@@ -686,7 +712,7 @@ export function ChatScreen() {
           </View>
         </View>
 
-        {(callState === 'in-call' || callState === 'connecting' || callState === 'ringing' || callState === 'incoming') ? (
+        {HAS_WEBRTC && (callState === 'in-call' || callState === 'connecting' || callState === 'ringing' || callState === 'incoming') ? (
           <View style={styles.mediaSection}>
             <View style={styles.remoteWrap}>
               {remoteStreamUrl ? (
@@ -769,8 +795,10 @@ const styles = StyleSheet.create({
   contextTitle: { color: colors.textPrimary, fontWeight: '700', fontSize: 16 },
   contextMeta: { color: colors.textSecondary, fontSize: 12, marginTop: 2 },
   callBanner: { color: colors.primaryDark, marginTop: 6, fontSize: 12 },
+  webrtcNote: { color: '#92400e', marginTop: 6, fontSize: 12 },
   callActions: { flexDirection: 'row', gap: 8, marginTop: 8 },
   callButton: { backgroundColor: colors.primary, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
+  callButtonDisabled: { opacity: 0.5 },
   callEndButton: { backgroundColor: colors.danger, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   acceptButton: { backgroundColor: '#16a34a', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   rejectButton: { backgroundColor: '#b91c1c', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
