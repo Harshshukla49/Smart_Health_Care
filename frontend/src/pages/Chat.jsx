@@ -9,7 +9,7 @@ import { Button } from '../components/Button';
 import { getPatients, getChatMessages, getChatThreadContext, markChatMessageRead, sendChatMessage } from '../services/api';
 import { getAuthSession } from '../utils/auth';
 
-const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 const PRESENCE_PING_MS = 20000;
 const RTC_CONFIG = {
   iceServers: [

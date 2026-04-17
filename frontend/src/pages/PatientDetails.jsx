@@ -29,7 +29,7 @@ import {
 } from '../services/api';
 import { getAuthSession } from '../utils/auth';
 
-const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 
 export function PatientDetails() {
   const { patientId } = useParams();

@@ -3,7 +3,7 @@ import { fallbackPatients } from '../data/demoData';
 import { getAuthSession } from '../utils/auth';
 
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000',
+  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com',
   timeout: 12000,
 });
 

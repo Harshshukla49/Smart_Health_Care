@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { getApiPatientById, getPatientVitals, getPatients } from '../services/api';
 import { getAuthSession } from '../utils/auth';
 
-const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 const POLL_INTERVAL_MS = 3000;
 const ECG_MAX_POINTS = 100;
 const UPDATE_THROTTLE_MS = 350;

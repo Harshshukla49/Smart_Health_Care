@@ -1,4 +1,4 @@
-const DEFAULT_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'http://localhost:5000';
+const DEFAULT_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 const DEFAULT_SOS_API_BASE_URL = process.env.EXPO_PUBLIC_SOS_API_BASE_URL || 'http://localhost:5001';
 
 function resolveForPhysicalDevice(rawUrl) {
