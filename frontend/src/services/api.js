@@ -4,12 +4,12 @@ import { getAuthSession } from '../utils/auth';
 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com',
-  timeout: 12000,
+  timeout: 60000,
 });
 
 const sosApi = axios.create({
   baseURL: import.meta.env.VITE_SOS_API_BASE_URL || 'http://localhost:5001',
-  timeout: 12000,
+  timeout: 60000,
 });
 
 const PATIENT_STORAGE_KEY = 'smart-health-patients';

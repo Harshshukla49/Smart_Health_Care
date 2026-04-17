@@ -45,12 +45,12 @@ function attachSessionHeaders(config) {
 
 export const apiClient = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 12000,
+  timeout: 60000,
 });
 
 export const sosApiClient = axios.create({
   baseURL: SOS_API_BASE_URL,
-  timeout: 12000,
+  timeout: 60000,
 });
 
 apiClient.interceptors.request.use(attachSessionHeaders);
