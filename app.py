@@ -180,7 +180,19 @@ if TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN:
     twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
 # Initialize Firebase
-cred = credentials.Certificate("firebase_key.json")
+firebase_cred_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
+if firebase_cred_json:
+    # Production (Render): Load from environment variable
+    try:
+        import json
+        cred = credentials.Certificate(json.loads(firebase_cred_json))
+    except Exception as e:
+        print(f"Error loading Firebase credentials from env var: {e}")
+        raise
+else:
+    # Local development: Load from file
+    cred = credentials.Certificate("firebase_key.json")
+
 firebase_admin.initialize_app(cred, {
     'databaseURL': os.getenv('FIREBASE_DATABASE_URL', 'https://smart-health-care-cd723-default-rtdb.asia-southeast1.firebasedatabase.app/')
 })
