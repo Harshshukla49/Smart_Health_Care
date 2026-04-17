@@ -3722,4 +3722,12 @@ def on_subscribe_patient(data):
 if __name__ == '__main__':
     host = os.getenv('HOST', '0.0.0.0')
     port = int(os.getenv('PORT', '5000'))
-    socketio.run(app, host=host, port=port, debug=True)
+    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
+    allow_unsafe_werkzeug = os.getenv('ALLOW_UNSAFE_WERKZEUG', '1') == '1'
+    socketio.run(
+        app,
+        host=host,
+        port=port,
+        debug=debug_mode,
+        allow_unsafe_werkzeug=allow_unsafe_werkzeug,
+    )
