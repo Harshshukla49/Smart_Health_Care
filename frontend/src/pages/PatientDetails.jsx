@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import {
@@ -25,6 +25,7 @@ import {
   disconnectPatientDevice,
   getApiPatientById,
   getPatientPredictionAudit,
+  updatePatientManualValues,
 } from '../services/api';
 import { getAuthSession } from '../utils/auth';
 
@@ -40,6 +41,14 @@ export function PatientDetails() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [autoSaving, setAutoSaving] = useState(false);
+  const [manualValues, setManualValues] = useState({
+    heartRate: '',
+    spo2: '',
+    temperature: '',
+    ecgData: '',
+  });
+  const lastServerSignatureRef = useRef('');
 
   useEffect(() => {
     let active = true;
@@ -171,6 +180,23 @@ export function PatientDetails() {
     };
   }, [patient?.deviceConnected, patientId]);
 
+  useEffect(() => {
+    if (!patient) {
+      return;
+    }
+
+    const vitals = patient.vitals || {};
+    const ecgSource = Array.isArray(vitals.ecgData) ? vitals.ecgData : Array.isArray(patient.ecgData) ? patient.ecgData : [];
+    const nextValues = {
+      heartRate: String(vitals.heartRate ?? ''),
+      spo2: String(vitals.spo2 ?? ''),
+      temperature: String(vitals.temperature ?? ''),
+      ecgData: ecgSource.join(','),
+    };
+    setManualValues(nextValues);
+    lastServerSignatureRef.current = JSON.stringify(nextValues);
+  }, [patient]);
+
   const handleConnect = async () => {
     setActionLoading(true);
     try {
@@ -194,6 +220,67 @@ export function PatientDetails() {
       setActionLoading(false);
     }
   };
+
+  const handleManualChange = (event) => {
+    const { name, value } = event.target;
+    setManualValues((current) => ({
+      ...current,
+      [name]: value,
+    }));
+  };
+
+  const submitManualUpdate = async (values, mode = 'manual') => {
+    if (!patientId) {
+      return;
+    }
+
+    if (mode === 'manual') {
+      setActionLoading(true);
+    } else {
+      setAutoSaving(true);
+    }
+
+    setError('');
+    try {
+      const updated = await updatePatientManualValues(patientId, values);
+      setPatient(updated);
+      const nextAudit = await getPatientPredictionAudit(patientId);
+      setAudit(nextAudit);
+      lastServerSignatureRef.current = JSON.stringify(values);
+    } catch (requestError) {
+      setError(requestError?.response?.data?.message || requestError?.message || 'Unable to update patient values.');
+    } finally {
+      if (mode === 'manual') {
+        setActionLoading(false);
+      } else {
+        setAutoSaving(false);
+      }
+    }
+  };
+
+  const handleManualUpdate = async (event) => {
+    event.preventDefault();
+    await submitManualUpdate(manualValues, 'manual');
+  };
+
+  useEffect(() => {
+    if (!isDoctor || !patientId || actionLoading || autoSaving) {
+      return;
+    }
+
+    const nextSignature = JSON.stringify(manualValues);
+    if (nextSignature === lastServerSignatureRef.current) {
+      return;
+    }
+
+    const debounceHandle = window.setTimeout(() => {
+      submitManualUpdate(manualValues, 'auto');
+    }, 900);
+
+    return () => {
+      window.clearTimeout(debounceHandle);
+    };
+  }, [manualValues, isDoctor, patientId, actionLoading, autoSaving]);
 
   const chartData = useMemo(() => {
     const rows = Array.isArray(audit) ? audit.slice(-12) : [];
@@ -273,6 +360,55 @@ export function PatientDetails() {
                   Disconnect Device
                 </Button>
               </div>
+            </div>
+          ) : null}
+
+          {isDoctor ? (
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.3em] text-slate-400">Manual Values + Re-Predict</p>
+              <p className="mt-2 text-xs text-cyan-200/90">Auto predict is enabled. Model runs automatically after you stop typing.</p>
+              <form className="mt-3 grid gap-3 sm:grid-cols-2" onSubmit={handleManualUpdate}>
+                <input
+                  name="heartRate"
+                  type="number"
+                  step="0.1"
+                  value={manualValues.heartRate}
+                  onChange={handleManualChange}
+                  placeholder="Heart Rate"
+                  className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-white placeholder:text-slate-500 outline-none"
+                />
+                <input
+                  name="spo2"
+                  type="number"
+                  step="0.1"
+                  value={manualValues.spo2}
+                  onChange={handleManualChange}
+                  placeholder="SpO2"
+                  className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-white placeholder:text-slate-500 outline-none"
+                />
+                <input
+                  name="temperature"
+                  type="number"
+                  step="0.1"
+                  value={manualValues.temperature}
+                  onChange={handleManualChange}
+                  placeholder="Temperature"
+                  className="rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-white placeholder:text-slate-500 outline-none"
+                />
+                <textarea
+                  name="ecgData"
+                  rows={3}
+                  value={manualValues.ecgData}
+                  onChange={handleManualChange}
+                  placeholder="ECG samples comma-separated"
+                  className="sm:col-span-2 rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-white placeholder:text-slate-500 outline-none"
+                />
+                <div className="sm:col-span-2">
+                  <Button type="submit" disabled={actionLoading}>
+                    {actionLoading ? 'Updating...' : autoSaving ? 'Auto Predicting...' : 'Update Values & Predict'}
+                  </Button>
+                </div>
+              </form>
             </div>
           ) : null}
         </Card>

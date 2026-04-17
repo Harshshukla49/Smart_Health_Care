@@ -3,6 +3,8 @@ import { NavLink, Link } from 'react-router-dom';
 import { Menu, HeartPulse } from 'lucide-react';
 import { navigationLinks } from '../data/demoData';
 import { Sidebar } from './Sidebar';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { useI18n } from '../context/I18nContext';
 
 const linkClasses = ({ isActive }) =>
   [
@@ -11,7 +13,15 @@ const linkClasses = ({ isActive }) =>
   ].join(' ');
 
 export function Navbar() {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
+
+  const labelByPath = {
+    '/': t('public.nav.home'),
+    '/about': t('public.nav.about'),
+    '/blog': t('public.nav.blog'),
+    '/contact': t('public.nav.contact'),
+  };
 
   return (
     <>
@@ -21,7 +31,7 @@ export function Navbar() {
             type="button"
             onClick={() => setOpen(true)}
             className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:bg-white/10 lg:hidden"
-            aria-label="Open menu"
+            aria-label={t('public.openMenu')}
           >
             <Menu className="h-5 w-5" />
           </button>
@@ -31,24 +41,28 @@ export function Navbar() {
               <HeartPulse className="h-5 w-5" />
             </span>
             <span className="hidden flex-col sm:flex">
-              <span className="font-heading text-lg font-bold leading-none text-white">Smart Health</span>
-              <span className="font-body text-xs uppercase tracking-[0.3em] text-slate-400">Remote Monitoring</span>
+              <span className="font-heading text-lg font-bold leading-none text-white">{t('common.smartHealth')}</span>
+              <span className="font-body text-xs uppercase tracking-[0.3em] text-slate-400">{t('public.brandSub')}</span>
             </span>
           </Link>
 
           <nav className="hidden items-center gap-2 lg:flex">
             {navigationLinks.map((link) => (
               <NavLink key={link.path} to={link.path} className={linkClasses}>
-                {link.label}
+                {labelByPath[link.path] || link.label}
               </NavLink>
             ))}
           </nav>
+
+          <div className="hidden lg:flex">
+            <LanguageSwitcher compact />
+          </div>
 
           <Link
             to="/login"
             className="hidden rounded-full border border-cyan-300/25 bg-gradient-to-r from-cyan-400/18 via-sky-400/18 to-fuchsia-400/18 px-4 py-2 text-sm font-semibold text-white shadow-[0_0_0_1px_rgba(125,211,252,0.15),0_18px_50px_rgba(14,165,233,0.16)] backdrop-blur-xl transition hover:-translate-y-0.5 hover:border-cyan-200/45 hover:bg-white/10 lg:inline-flex"
           >
-            Login
+            {t('public.login')}
           </Link>
         </div>
       </header>

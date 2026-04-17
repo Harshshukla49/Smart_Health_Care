@@ -1,50 +1,71 @@
 import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowRight, HeartPulse, LoaderCircle, Lock, Mail, Phone, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, ArrowRight, HeartPulse, LoaderCircle, Lock, Mail, Phone, ShieldCheck, User } from 'lucide-react';
 import { Button } from './Button';
+import { OtpPasswordReset } from './OtpPasswordReset';
 import { getDashboardPathForRole, setAuthSession } from '../utils/auth';
+import { useI18n } from '../context/I18nContext';
 import {
-  confirmDoctorPasswordReset,
   loginDoctor,
-  requestDoctorPasswordReset,
   signupDoctor,
 } from '../services/api';
 
 export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, ctaLabel = 'Login', helperCopy }) {
   const navigate = useNavigate();
+  const { t } = useI18n();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phone, setPhone] = useState('');
-  const [resetToken, setResetToken] = useState('');
-  const [resetPassword, setResetPassword] = useState('');
-  const [showReset, setShowReset] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   const emailPattern = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/, []);
-  const roleLabel = role === 'doctor' ? 'Doctor' : 'Patient';
+  const roleLabel = role === 'doctor' ? t('roles.doctor') : t('roles.patient');
   const isSignup = mode === 'signup';
+  const isDoctor = role === 'doctor';
   const selectionPath = isSignup ? '/signup' : '/login';
   const alternatePath = role === 'doctor'
     ? (isSignup ? '/login/doctor' : '/signup/doctor')
     : (isSignup ? '/login/patient' : '/signup/patient');
 
+  const rolePillars = isDoctor
+    ? t('auth.rolePage.doctorPillars')
+    : t('auth.rolePage.patientPillars');
+
+  const trustStats = isDoctor
+    ? [
+      { label: 'Clinical Workflows', value: 'Care Ops Ready' },
+      { label: 'Alert Coverage', value: '24/7 Monitoring' },
+      { label: 'Access Control', value: 'Role Guarded' },
+    ]
+    : [
+      { label: 'Patient Workspace', value: 'Personalized View' },
+      { label: 'Monitoring Sync', value: 'Near Real-time' },
+      { label: 'Support Routing', value: 'Priority Signals' },
+    ];
+
   const handleSubmit = async (event) => {
     event.preventDefault();
 
     if (!emailPattern.test(email)) {
-      setError('Enter a valid email address.');
+      setError(t('auth.rolePage.invalidEmail'));
       return;
     }
 
     if (password.trim().length < 6) {
-      setError('Password must be at least 6 characters.');
+      setError(t('auth.rolePage.invalidPassword'));
+      return;
+    }
+
+    if (role === 'doctor' && isSignup && name.trim().length < 2) {
+      setError(t('auth.rolePage.doctorNameRequired'));
       return;
     }
 
     if (role === 'doctor' && isSignup && phone.trim().length < 8) {
-      setError('Doctor phone number is required.');
+      setError(t('auth.rolePage.doctorPhoneRequired'));
       return;
     }
 
@@ -56,7 +77,7 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
         let result = null;
         if (isSignup) {
           result = await signupDoctor({
-            name: email.split('@')[0],
+            name,
             email,
             phone,
             password,
@@ -71,7 +92,7 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
         setAuthSession({
           role,
           email: doctor?.email || email,
-          name: doctor?.name || email.split('@')[0],
+          name: doctor?.name || name || email.split('@')[0],
           phone: doctor?.phone || phone,
           token: auth?.token || '',
           tokenExpiresIn: auth?.expiresIn || 0,
@@ -86,38 +107,7 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
 
       navigate(getDashboardPathForRole(role), { replace: true });
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'Authentication failed.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleDoctorReset = async (event) => {
-    event.preventDefault();
-    if (role !== 'doctor') {
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    try {
-      if (!resetToken) {
-        const result = await requestDoctorPasswordReset({ email });
-        setResetToken(result?.token || '');
-        return;
-      }
-
-      await confirmDoctorPasswordReset({
-        email,
-        token: resetToken,
-        newPassword: resetPassword,
-      });
-
-      setShowReset(false);
-      setResetPassword('');
-      setResetToken('');
-    } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || 'Password reset failed.');
+      setError(requestError?.response?.data?.message || requestError?.message || t('auth.rolePage.authFailed'));
     } finally {
       setLoading(false);
     }
@@ -127,6 +117,13 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
     <div className="relative min-h-screen overflow-hidden bg-[#050816] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.34),transparent_32%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.3),transparent_32%),radial-gradient(circle_at_bottom,rgba(20,184,166,0.18),transparent_28%),linear-gradient(135deg,#020617_0%,#08101f_46%,#120b25_100%)]" />
       <div className="pointer-events-none absolute left-1/2 top-0 h-80 w-80 -translate-x-1/2 rounded-full bg-cyan-400/10 blur-3xl" />
+
+      <div className="relative z-20 px-4 pt-4 sm:px-6 lg:px-8">
+        <Link to="/" className="dashboard-back-link" aria-label={t('auth.backToHome')}>
+          <ArrowLeft className="h-4 w-4" />
+          <span className="dashboard-back-label">{t('auth.backToHome')}</span>
+        </Link>
+      </div>
 
       <motion.div
         className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8"
@@ -138,24 +135,28 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
           <div className="flex flex-col justify-center gap-6">
             <Link to={selectionPath} className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 backdrop-blur-xl transition hover:bg-white/10">
               <ShieldCheck className="h-4 w-4 text-cyan-200" />
-              Secure access
+              {t('auth.rolePage.secureAccess')}
             </Link>
 
             <div className="space-y-4">
-              <p className={`text-sm font-semibold uppercase tracking-[0.35em] ${accent}`}>{roleLabel} {isSignup ? 'Signup' : 'Login'}</p>
+              <p className={`text-sm font-semibold uppercase tracking-[0.35em] ${accent}`}>{roleLabel} {isSignup ? t('auth.signUp') : t('auth.login')}</p>
               <h1 className="max-w-xl font-display text-4xl font-bold leading-tight text-white md:text-6xl">{title}</h1>
               <p className="max-w-xl text-base leading-8 text-slate-300 md:text-lg">{subtitle}</p>
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              {[
-                'Glassmorphism interface with clear hierarchy',
-                'Smooth motion for high-trust clinical workflows',
-                'Role-based dashboard redirect after sign in',
-                'Mobile-friendly from login through monitoring',
-              ].map((item) => (
+              {rolePillars.map((item) => (
                 <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm leading-6 text-slate-200 backdrop-blur-xl">
                   {item}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {trustStats.map((stat) => (
+                <div key={stat.label} className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4 backdrop-blur-xl">
+                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400">{stat.label}</p>
+                  <p className="mt-2 text-sm font-semibold text-slate-100">{stat.value}</p>
                 </div>
               ))}
             </div>
@@ -176,32 +177,43 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
               </div>
 
               <form className="space-y-4" onSubmit={handleSubmit}>
+                {role === 'doctor' && isSignup ? (
+                  <Field
+                    label={t('auth.rolePage.doctorName')}
+                    type="text"
+                    icon={<User className="h-4 w-4" />}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                    placeholder={t('auth.rolePage.doctorNamePlaceholder')}
+                  />
+                ) : null}
+
                 <Field
-                  label="Email"
+                  label={t('auth.rolePage.email')}
                   type="email"
                   icon={<Mail className="h-4 w-4" />}
                   value={email}
                   onChange={(event) => setEmail(event.target.value)}
-                  placeholder="you@example.com"
+                  placeholder={t('auth.rolePage.emailPlaceholder')}
                 />
 
                 <Field
-                  label="Password"
+                  label={t('auth.rolePage.password')}
                   type="password"
                   icon={<Lock className="h-4 w-4" />}
                   value={password}
                   onChange={(event) => setPassword(event.target.value)}
-                  placeholder="••••••••"
+                  placeholder={t('auth.rolePage.passwordPlaceholder')}
                 />
 
                 {role === 'doctor' && isSignup ? (
                   <Field
-                    label="Phone"
+                    label={t('auth.rolePage.phone')}
                     type="tel"
                     icon={<Phone className="h-4 w-4" />}
                     value={phone}
                     onChange={(event) => setPhone(event.target.value)}
-                    placeholder="+91XXXXXXXXXX"
+                    placeholder={t('auth.rolePage.phonePlaceholder')}
                   />
                 ) : null}
 
@@ -215,7 +227,7 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
                   {loading ? (
                     <>
                       <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {isSignup ? 'Creating account...' : 'Signing in...'}
+                      {isSignup ? t('auth.rolePage.createAccountProgress') : t('auth.rolePage.signingInProgress')}
                     </>
                   ) : (
                     <>
@@ -226,61 +238,19 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
                 </Button>
 
                 <p className="text-center text-sm leading-6 text-slate-300">
-                  Continue to your {roleLabel.toLowerCase()} dashboard after authentication.
+                  {t('auth.rolePage.continueToDashboard', { role: roleLabel.toLowerCase() })}
                 </p>
 
                 <p className="text-center text-sm leading-6 text-slate-300">
-                  {isSignup ? 'Already have an account?' : 'Need a new account?'}{' '}
+                  {isSignup ? t('auth.rolePage.alreadyHaveAccount') : t('auth.rolePage.needNewAccount')}{' '}
                   <Link to={alternatePath} className="font-semibold text-cyan-200 transition hover:text-cyan-100">
-                    {isSignup ? 'Login' : 'Sign up'}
+                    {isSignup ? t('auth.login') : t('auth.signUp')}
                   </Link>
                 </p>
 
-                {role === 'doctor' && !isSignup ? (
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3">
-                    <button
-                      type="button"
-                      onClick={() => setShowReset((prev) => !prev)}
-                      className="text-sm font-semibold text-cyan-200"
-                    >
-                      {showReset ? 'Hide reset password' : 'Forgot doctor password? Reset with email'}
-                    </button>
-
-                    {showReset ? (
-                      <form className="mt-3 space-y-3" onSubmit={handleDoctorReset}>
-                        <Field
-                          label="Reset Token"
-                          type="text"
-                          icon={<ShieldCheck className="h-4 w-4" />}
-                          value={resetToken}
-                          onChange={(event) => setResetToken(event.target.value)}
-                          placeholder="Token from email (auto-filled after request)"
-                        />
-                        <Field
-                          label="New Password"
-                          type="password"
-                          icon={<Lock className="h-4 w-4" />}
-                          value={resetPassword}
-                          onChange={(event) => setResetPassword(event.target.value)}
-                          placeholder="Enter new password"
-                        />
-                        <Button
-                          type="submit"
-                          variant="secondary"
-                          disabled={
-                            loading
-                            || !email
-                            || (!!resetToken && resetToken.trim().length < 10)
-                            || (!!resetToken && resetPassword.trim().length < 6)
-                          }
-                        >
-                          {resetToken ? 'Confirm Password Reset' : 'Send Reset Token'}
-                        </Button>
-                      </form>
-                    ) : null}
-                  </div>
-                ) : null}
               </form>
+
+              {role === 'doctor' && !isSignup ? <OtpPasswordReset role="doctor" defaultPhone={phone} /> : null}
             </div>
           </motion.div>
         </div>

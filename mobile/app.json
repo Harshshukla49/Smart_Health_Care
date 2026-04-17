@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Smart Health Mobile",
+    "slug": "smart-health-mobile",
+    "version": "1.0.0",
+    "scheme": "smarthealthmobile",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.smarthealth.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Smart Health to use your camera for video consultation.",
+        "NSMicrophoneUsageDescription": "Allow Smart Health to use your microphone for voice communication."
+      },
+      "bitcode": false
+    },
+    "android": {
+      "package": "com.smarthealth.app",
+      "permissions": [
+        "CAMERA",
+        "RECORD_AUDIO",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH"
+      ]
+    },
+    "plugins": [
+      [
+        "@config-plugins/react-native-webrtc",
+        {
+          "cameraPermission": "Allow Smart Health to use your camera for video consultation.",
+          "microphonePermission": "Allow Smart Health to use your microphone for voice communication."
+        }
+      ]
+    ],
+    "web": {
+      "bundler": "metro"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "ed3eaed6-ed87-4681-84ac-d6705ccf38f2"
+      }
+    }
+  }
+}

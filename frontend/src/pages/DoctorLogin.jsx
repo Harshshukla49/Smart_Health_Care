@@ -1,15 +1,17 @@
 import React from 'react';
 import { RoleLoginPage } from '../components/RoleLoginPage';
+import { useI18n } from '../context/I18nContext';
 
 export function DoctorLogin() {
+  const { t } = useI18n();
   return (
     <RoleLoginPage
       role="doctor"
-      title="Doctor access for your clinical command center."
-      subtitle="Log in to review patient load, vitals trends, and critical alerts from a premium healthcare dashboard."
+      title={t('auth.rolePage.doctorLoginTitle')}
+      subtitle={t('auth.rolePage.doctorLoginSubtitle')}
       accent="text-fuchsia-300"
-      helperCopy="Doctor portal login"
-      ctaLabel="Login"
+      helperCopy={t('auth.rolePage.doctorPortalLogin')}
+      ctaLabel={t('auth.login')}
     />
   );
 }

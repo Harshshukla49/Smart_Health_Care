@@ -8,6 +8,8 @@ import { Blog } from './pages/Blog';
 import { Contact } from './pages/Contact';
 import { AddPatient } from './pages/AddPatient';
 import { PatientDetails } from './pages/PatientDetails';
+import { Dashboard } from './pages/Dashboard';
+import { Chat } from './pages/Chat';
 import { NotFound } from './pages/NotFound';
 import { LoginSelection } from './pages/LoginSelection';
 import { PatientLogin } from './pages/PatientLogin';
@@ -15,48 +17,23 @@ import { DoctorLogin } from './pages/DoctorLogin';
 import { SignupSelection } from './pages/SignupSelection';
 import { PatientSignup } from './pages/PatientSignup';
 import { DoctorSignup } from './pages/DoctorSignup';
-import { PatientDashboard } from './pages/PatientDashboard';
-import { DoctorDashboard } from './pages/DoctorDashboard';
-import { getAuthSession, getDashboardPathForRole } from './utils/auth';
-
-function DashboardEntry() {
-  const session = getAuthSession();
-  return <Navigate to={session ? getDashboardPathForRole(session.role) : '/login'} replace />;
-}
+import { getAuthSession } from './utils/auth';
 
 function AuthRoute({ children }) {
   const session = getAuthSession();
 
   if (session) {
-    return <Navigate to={getDashboardPathForRole(session.role)} replace />;
+    return <Navigate to="/dashboard" replace />;
   }
 
   return children;
 }
 
-function RoleDashboardRoute({ role, children }) {
+function AuthenticatedRoute({ children }) {
   const session = getAuthSession();
 
   if (!session) {
     return <Navigate to="/login" replace />;
-  }
-
-  if (session.role !== role) {
-    return <Navigate to={getDashboardPathForRole(session.role)} replace />;
-  }
-
-  return children;
-}
-
-function DoctorOnlyRoute({ children }) {
-  const session = getAuthSession();
-
-  if (!session) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (session.role !== 'doctor') {
-    return <Navigate to={getDashboardPathForRole(session.role)} replace />;
   }
 
   return children;
@@ -81,15 +58,16 @@ export default function App() {
           <Route path="/signup" element={<AuthRoute><SignupSelection /></AuthRoute>} />
           <Route path="/signup/patient" element={<AuthRoute><PatientSignup /></AuthRoute>} />
           <Route path="/signup/doctor" element={<AuthRoute><DoctorSignup /></AuthRoute>} />
-          <Route path="/dashboard" element={<DashboardEntry />} />
-          <Route path="/dashboard/patient" element={<RoleDashboardRoute role="patient"><PatientDashboard /></RoleDashboardRoute>} />
-          <Route path="/dashboard/doctor" element={<RoleDashboardRoute role="doctor"><DoctorDashboard /></RoleDashboardRoute>} />
+          <Route path="/dashboard" element={<AuthenticatedRoute><Dashboard /></AuthenticatedRoute>} />
+          <Route path="/chat" element={<AuthenticatedRoute><Chat /></AuthenticatedRoute>} />
+          <Route path="/dashboard/patient" element={<Navigate to="/dashboard" replace />} />
+          <Route path="/dashboard/doctor" element={<Navigate to="/dashboard" replace />} />
           <Route path="/" element={<MainLayout><Home /></MainLayout>} />
           <Route path="/about" element={<MainLayout><About /></MainLayout>} />
           <Route path="/blog" element={<MainLayout><Blog /></MainLayout>} />
           <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
-          <Route path="/add-patient" element={<DoctorOnlyRoute><AddPatient /></DoctorOnlyRoute>} />
-          <Route path="/patients/:patientId" element={<DoctorOnlyRoute><MainLayout><PatientDetails /></MainLayout></DoctorOnlyRoute>} />
+          <Route path="/add-patient" element={<AuthenticatedRoute><AddPatient /></AuthenticatedRoute>} />
+          <Route path="/patients/:patientId" element={<AuthenticatedRoute><MainLayout><PatientDetails /></MainLayout></AuthenticatedRoute>} />
           <Route path="*" element={<MainLayout><NotFound /></MainLayout>} />
         </Routes>
       </motion.div>

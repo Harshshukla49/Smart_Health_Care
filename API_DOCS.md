@@ -11,7 +11,9 @@ http://127.0.0.1:5000
 
 ### `POST /predict`
 
-**Purpose**: Predict heart disease risk using ML model trained on heart disease dataset.
+**Purpose**: Predict risk using the trained model that matches the submitted payload.
+
+If the request includes the 11 clinical ECG fields below, the backend uses the trained heart-disease model. If the request only includes `heart_rate`, `spo2`, and `temperature`, the backend uses the existing vitals model.
 
 **Request Body**: JSON object with **exactly 11 required fields**:
 
@@ -69,8 +71,11 @@ curl -X POST http://127.0.0.1:5000/predict \
 **Success (200)**:
 ```json
 {
-  "prediction": "No Heart Disease",
-  "probability": 0.85
+  "prediction": "normal",
+  "status": "Normal",
+  "risk": "Low",
+  "confidence": 0.85,
+  "message": "The trained ECG model indicates no high-risk heart-disease pattern."
 }
 ```
 
@@ -118,8 +123,10 @@ Also supports vitals-only prediction:
 Returns: `{"status": "Normal"}` or `{"status": "Critical"}`
 
 ## Model Details
-- **Model**: `heart_model.pkl` (scikit-learn)
-- **Features**: 11 clinical features from heart disease dataset
+- **ECG model**: `heart_model.pkl` (scikit-learn)
+- **ECG features**: 11 clinical features from the heart disease dataset
+- **Vitals model**: `vitals_model.pkl` (scikit-learn)
+- **Vitals features**: `heart_rate`, `spo2`, `temperature`
 - **Backend**: Flask + joblib + pandas + numpy
 
 ## Troubleshooting

@@ -17,6 +17,11 @@ export const featureItems = [
     icon: 'shield-alert',
   },
   {
+    title: 'Unified ECG monitoring',
+    description: 'Watch live ECG waveforms in the same dashboard used for heart rate, SpO2, and temperature.',
+    icon: 'heart-pulse',
+  },
+  {
     title: 'Care team visibility',
     description: 'Give doctors and family members a shared operational view of patient well-being.',
     icon: 'users',

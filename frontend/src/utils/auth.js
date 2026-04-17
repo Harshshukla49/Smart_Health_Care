@@ -1,8 +1,8 @@
 const AUTH_STORAGE_KEY = 'smart-health-auth-session';
 
 export const DASHBOARD_ROUTES = {
-  patient: '/dashboard/patient',
-  doctor: '/dashboard/doctor',
+  patient: '/dashboard',
+  doctor: '/dashboard',
 };
 
 export function normalizeRole(role) {

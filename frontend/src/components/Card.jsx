@@ -1,14 +1,26 @@
 import React from 'react';
 import { motion } from 'framer-motion';
 
-export function Card({ className = '', children, ...props }) {
+export function Card({ className = '', children, gradient = false, ...props }) {
+  const baseClasses = [
+    'card',
+    'card-glass',
+    'rounded-[20px]',
+    'p-6',
+    'overflow-hidden',
+    'transition-all',
+    'duration-300',
+    'border', 
+    'border-white/10',
+    'hover:border-white/20',
+    gradient ? 'bg-gradient-to-br from-white/5 to-white/2' : '',
+    className,
+  ].filter(Boolean).join(' ');
+
   return (
     <motion.div
-      className={[
-        'rounded-3xl border border-white/12 bg-white/8 p-6 shadow-glass backdrop-blur-xl transition-all duration-300 hover:border-cyan-300/35 hover:bg-white/10',
-        className,
-      ].join(' ')}
-      whileHover={{ y: -3, scale: 1.01 }}
+      className={baseClasses}
+      whileHover={{ y: -3 }}
       transition={{ type: 'spring', stiffness: 260, damping: 24 }}
       {...props}
     >

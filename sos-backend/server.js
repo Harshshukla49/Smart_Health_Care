@@ -176,6 +176,9 @@ app.post('/api/sos/reset', async (req, res) => {
 });
 
 const port = Number(process.env.SOS_BACKEND_PORT || 5001);
-app.listen(port, () => {
-  console.log(`SOS backend listening on http://127.0.0.1:${port}`);
+const requestedHost = String(process.env.SOS_BACKEND_HOST || '').trim();
+const host = ['127.0.0.1', 'localhost', '::1'].includes(requestedHost) ? '0.0.0.0' : (requestedHost || '0.0.0.0');
+
+app.listen(port, host, () => {
+  console.log(`SOS backend listening on http://${host}:${port}`);
 });

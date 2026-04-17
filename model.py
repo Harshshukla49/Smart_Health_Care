@@ -84,5 +84,5 @@ def train_vitals_model(csv_path: Path, model_output_path: Path) -> dict:
 if __name__ == "__main__":
     base_dir = Path(__file__).resolve().parent
     dataset_path = base_dir / "datasetheartrate" / "vitals_dataset.csv"
-    model_path = base_dir / "model.pkl"
+    model_path = base_dir / "vitals_model.pkl"
     train_vitals_model(dataset_path, model_path)

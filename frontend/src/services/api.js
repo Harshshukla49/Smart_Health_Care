@@ -75,6 +75,23 @@ const toText = (value, fallback = '') => {
   return String(value);
 };
 
+const toEcgArray = (value) => {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item));
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(/[\s,]+/)
+      .map((item) => Number(item))
+      .filter((item) => Number.isFinite(item));
+  }
+
+  return [];
+};
+
 const toPredictionStatus = (predictionValue) => {
   if (!predictionValue) {
     return '';
@@ -151,6 +168,7 @@ const normalizeReading = (reading) => ({
 
 export const normalizePatient = (patient = {}) => {
   const readings = Array.isArray(patient.readings) ? patient.readings.map(normalizeReading).slice(-10) : [];
+  const ecgData = toEcgArray(patient.ecgData || patient.vitals?.ecgData || patient.ecg || patient.ecgSignal);
 
   return {
     id: toText(patient.id || patient.patientId || patient._id, `patient-${Math.random().toString(36).slice(2, 9)}`),
@@ -169,6 +187,7 @@ export const normalizePatient = (patient = {}) => {
     updatedAt: toText(patient.updatedAt || patient.timestamp, new Date().toLocaleString()),
     createdAt: toText(patient.createdAt, ''),
     notes: toText(patient.notes, ''),
+    ecgData,
     readings,
   };
 };
@@ -224,6 +243,7 @@ const buildPatientAccountPayload = ({
   heartRate,
   spo2,
   temperature,
+  ecgData,
 }) => ({
   name: toText(name, 'Unnamed Patient'),
   age: toNumber(age),
@@ -234,6 +254,7 @@ const buildPatientAccountPayload = ({
   heart_rate: toNumber(heartRate),
   spo2: toNumber(spo2),
   temperature: toNumber(temperature),
+  ecgData: toEcgArray(ecgData),
 });
 
 export const getPatients = async () => {
@@ -356,38 +377,58 @@ export const loginDoctor = async ({ email, password }) => {
   };
 };
 
-export const requestDoctorPasswordReset = async ({ email }) => {
-  const response = await api.post('/doctor/reset-password/request', {
-    email: toText(email).toLowerCase(),
+export const verifyFirebasePhoneToken = async ({ idToken, role }) => {
+  const response = await api.post('/auth/firebase/verify-phone-token', {
+    idToken: toText(idToken),
+    role: toText(role).toLowerCase(),
   });
-  return response.data;
+
+  return {
+    uid: toText(response.data?.uid),
+    phone: toText(response.data?.phone),
+    role: toText(response.data?.role),
+    auth: response.data?.auth || null,
+    user: response.data?.user || null,
+  };
 };
 
-export const confirmDoctorPasswordReset = async ({ email, token, newPassword }) => {
-  const response = await api.post('/doctor/reset-password/confirm', {
-    email: toText(email).toLowerCase(),
-    token: toText(token),
+export const resetPasswordWithFirebasePhone = async ({ idToken, role, newPassword, confirmPassword }) => {
+  const response = await api.post('/reset-password/firebase-phone', {
+    idToken: toText(idToken),
+    role: toText(role).toLowerCase(),
     newPassword: toText(newPassword),
+    confirmPassword: toText(confirmPassword),
   });
   return response.data;
 };
 
-export const requestPatientPasswordReset = async ({ patientId, email }) => {
-  const response = await api.post('/patient/reset-password/request', {
+export const updateDoctorProfile = async ({ name, email, phone }) => {
+  const response = await api.post('/doctor/profile/update', {
+    name: toText(name),
+    email: toText(email).toLowerCase(),
+    phone: toText(phone),
+  });
+
+  return {
+    doctor: response.data?.doctor || null,
+    auth: response.data?.auth || null,
+    syncedPatients: toNumber(response.data?.syncedPatients, 0),
+    message: response.data?.message || 'Doctor profile updated successfully.',
+  };
+};
+
+export const updatePatientProfile = async ({ patientId, email, phone }) => {
+  const response = await api.post('/patient/profile/update', {
     patientId: toText(patientId),
     email: toText(email).toLowerCase(),
+    phone: toText(phone),
   });
-  return response.data;
-};
 
-export const confirmPatientPasswordReset = async ({ patientId, email, token, newPassword }) => {
-  const response = await api.post('/patient/reset-password/confirm', {
-    patientId: toText(patientId),
-    email: toText(email).toLowerCase(),
-    token: toText(token),
-    newPassword: toText(newPassword),
-  });
-  return response.data;
+  return {
+    patient: normalizePatient(response.data?.patient || {}),
+    auth: response.data?.auth || null,
+    message: response.data?.message || 'Patient profile updated successfully.',
+  };
 };
 
 export const getPatientProfile = async (patientId) => {
@@ -424,8 +465,25 @@ export const getPatientVitals = async (patientId) => {
     heartRate: toNumber(payload.heartRate ?? payload.heart_rate),
     spo2: toNumber(payload.spo2 ?? payload.SpO2),
     temperature: toNumber(payload.temperature ?? payload.temp),
+    ecgData: toEcgArray(payload.ecgData || payload.ecg || payload.ecgSignal),
     updatedAt: toText(payload.updatedAt || payload.timestamp, new Date().toLocaleTimeString()),
   };
+};
+
+export const updatePatientManualValues = async (patientId, input) => {
+  const parsedEcg = toEcgArray(input?.ecgData);
+  const payload = {
+    heart_rate: input?.heartRate,
+    spo2: input?.spo2,
+    temperature: input?.temperature,
+  };
+
+  if (parsedEcg.length) {
+    payload.ecgData = parsedEcg;
+  }
+
+  const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/manual-update`, payload);
+  return response.data?.data || null;
 };
 
 export const predictVitals = async ({ heartRate, spo2, temperature }) => {
@@ -477,6 +535,41 @@ export const triggerSosAlert = async ({ patientId, heartRate, spo2, temperature 
   });
 
   return response.data;
+};
+
+export const getChatThreadContext = async ({ patientId } = {}) => {
+  const query = patientId ? `?patientId=${encodeURIComponent(toText(patientId))}` : '';
+  const response = await api.get(`/chat/thread-context${query}`);
+  return response.data?.data || null;
+};
+
+export const getChatMessages = async (threadId, { limit = 60, before = '' } = {}) => {
+  const params = new URLSearchParams();
+  if (limit) {
+    params.set('limit', String(limit));
+  }
+  if (before) {
+    params.set('before', String(before));
+  }
+
+  const query = params.toString() ? `?${params.toString()}` : '';
+  const response = await api.get(`/chat/threads/${encodeURIComponent(toText(threadId))}/messages${query}`);
+  return Array.isArray(response.data?.messages) ? response.data.messages : [];
+};
+
+export const sendChatMessage = async ({ threadId, text, receiverId = '' }) => {
+  const response = await api.post(`/chat/threads/${encodeURIComponent(toText(threadId))}/messages`, {
+    text: toText(text),
+    receiverId: toText(receiverId),
+  });
+  return response.data?.message || null;
+};
+
+export const markChatMessageRead = async ({ messageId, threadId }) => {
+  const response = await api.patch(`/chat/messages/${encodeURIComponent(toText(messageId))}/read`, {
+    threadId: toText(threadId),
+  });
+  return response.data?.message || null;
 };
 
 export const submitContactMessage = async (formData) => {

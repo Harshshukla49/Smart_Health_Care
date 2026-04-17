@@ -1,16 +1,18 @@
 import React from 'react';
 import { RoleLoginPage } from '../components/RoleLoginPage';
+import { useI18n } from '../context/I18nContext';
 
 export function PatientSignup() {
+  const { t } = useI18n();
   return (
     <RoleLoginPage
       role="patient"
       mode="signup"
-      title="Create your patient account in minutes."
-      subtitle="Sign up to view your latest vitals, care notes, and monitoring status from one secure patient workspace."
+      title={t('auth.rolePage.patientSignupTitle')}
+      subtitle={t('auth.rolePage.patientSignupSubtitle')}
       accent="text-cyan-300"
-      helperCopy="Patient account signup"
-      ctaLabel="Sign up"
+      helperCopy={t('auth.rolePage.patientAccountSignup')}
+      ctaLabel={t('auth.signUp')}
     />
   );
 }

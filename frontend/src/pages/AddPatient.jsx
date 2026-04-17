@@ -16,6 +16,7 @@ const initialForm = {
   heartRate: '',
   spo2: '',
   temperature: '',
+  ecgData: '',
 };
 
 const requiredFields = ['name', 'age', 'gender', 'phone', 'email', 'symptoms'];
@@ -137,6 +138,18 @@ export function AddPatient() {
           <Field label="Heart Rate (Optional Override)" name="heartRate" type="number" value={formData.heartRate} onChange={handleChange} placeholder="bpm" required={false} />
           <Field label="SpO2 (Optional Override)" name="spo2" type="number" value={formData.spo2} onChange={handleChange} placeholder="%" required={false} />
           <Field label="Temperature (Optional Override)" name="temperature" type="number" step="0.1" value={formData.temperature} onChange={handleChange} placeholder="°C" required={false} />
+
+          <label className="space-y-2 sm:col-span-2">
+            <span className="text-sm font-semibold text-slate-200">ECG Samples (Manual Optional)</span>
+            <textarea
+              name="ecgData"
+              value={formData.ecgData}
+              onChange={handleChange}
+              rows={3}
+              placeholder="Comma-separated ECG values, e.g. 0.12,0.45,-0.08,0.22"
+              className="w-full rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 text-white placeholder:text-slate-500 outline-none transition focus:border-cyan-300/50 focus:ring-2 focus:ring-cyan-300/20"
+            />
+          </label>
 
           <div className="sm:col-span-2">
             <Button type="submit" size="lg" disabled={loading || !canSubmit} className="w-full sm:w-auto">

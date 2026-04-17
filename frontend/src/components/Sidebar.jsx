@@ -3,6 +3,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Link, NavLink } from 'react-router-dom';
 import { HeartPulse, X } from 'lucide-react';
 import { navigationLinks } from '../data/demoData';
+import { LanguageSwitcher } from './LanguageSwitcher';
+import { useI18n } from '../context/I18nContext';
 
 const panelVariants = {
   hidden: { x: '-100%' },
@@ -11,6 +13,15 @@ const panelVariants = {
 };
 
 export function Sidebar({ open, onClose }) {
+  const { t } = useI18n();
+
+  const labelByPath = {
+    '/': t('public.nav.home'),
+    '/about': t('public.nav.about'),
+    '/blog': t('public.nav.blog'),
+    '/contact': t('public.nav.contact'),
+  };
+
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
     return () => {
@@ -35,7 +46,7 @@ export function Sidebar({ open, onClose }) {
         <>
           <motion.button
             type="button"
-            aria-label="Close sidebar"
+            aria-label={t('public.closeSidebar')}
             className="fixed inset-0 z-[60] bg-slate-950/70 backdrop-blur-sm lg:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -51,24 +62,28 @@ export function Sidebar({ open, onClose }) {
             animate="visible"
             exit="exit"
             transition={{ duration: 0.28, ease: 'easeInOut' }}
-            aria-label="Mobile navigation"
+            aria-label={t('public.mobileNavigation')}
           >
             <div className="flex items-center justify-between">
               <Link to="/" className="flex items-center gap-3" onClick={onClose}>
                 <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-fuchsia-500 text-slate-950 shadow-glow">
                   <HeartPulse className="h-5 w-5" />
                 </span>
-                <span className="font-display text-lg font-bold text-white">Smart Health</span>
+                <span className="font-display text-lg font-bold text-white">{t('common.smartHealth')}</span>
               </Link>
 
               <button
                 type="button"
                 onClick={onClose}
                 className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:bg-white/10"
-                aria-label="Close menu"
+                aria-label={t('public.closeMenu')}
               >
                 <X className="h-5 w-5" />
               </button>
+            </div>
+
+            <div className="mt-4">
+              <LanguageSwitcher />
             </div>
 
             <div className="mt-8 flex flex-col gap-2">
@@ -84,7 +99,7 @@ export function Sidebar({ open, onClose }) {
                   }
                   onClick={onClose}
                 >
-                  {link.label}
+                  {labelByPath[link.path] || link.label}
                 </NavLink>
               ))}
               <NavLink
@@ -92,12 +107,12 @@ export function Sidebar({ open, onClose }) {
                 className="mt-3 rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-fuchsia-500 px-4 py-3 text-base font-bold text-slate-950 shadow-glow"
                 onClick={onClose}
               >
-                Login
+                {t('public.login')}
               </NavLink>
             </div>
 
             <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
-              Monitor vitals, review trends, and respond to critical events from a single mobile-first workspace.
+              {t('public.sidebarBlurb')}
             </div>
           </motion.aside>
         </>
