@@ -3,7 +3,7 @@ import { Alert, Pressable, SafeAreaView, StyleSheet, Text, TextInput, View } fro
 import { useAuth } from '../../context/AuthContext';
 import { colors } from '../../theme/colors';
 
-export function PatientLoginScreen() {
+export function PatientLoginScreen({ navigation }) {
   const { signInPatient } = useAuth();
   const [patientId, setPatientId] = useState('');
   const [password, setPassword] = useState('');
@@ -42,6 +42,9 @@ export function PatientLoginScreen() {
         <Pressable style={styles.button} disabled={loading} onPress={onSubmit}>
           <Text style={styles.buttonText}>{loading ? 'Signing in...' : 'Sign in'}</Text>
         </Pressable>
+        <Pressable onPress={() => navigation.navigate('OtpEnterPhone')}>
+          <Text style={styles.link}>Forgot password? Reset with OTP</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
@@ -66,4 +69,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   buttonText: { color: '#fff', fontWeight: '700' },
+  link: { textAlign: 'center', color: colors.primaryDark, fontWeight: '600', marginTop: 8 },
 });

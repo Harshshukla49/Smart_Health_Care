@@ -16,7 +16,10 @@
         "NSCameraUsageDescription": "Allow Smart Health to use your camera for video consultation.",
         "NSMicrophoneUsageDescription": "Allow Smart Health to use your microphone for voice communication."
       },
-      "bitcode": false
+      "bitcode": false,
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "android": {
       "package": "com.smarthealth.app",
@@ -30,8 +33,19 @@
         "android.permission.RECORD_AUDIO",
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.WAKE_LOCK",
+        "android.permission.BLUETOOTH",
+        "CAMERA",
+        "RECORD_AUDIO",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WAKE_LOCK",
         "android.permission.BLUETOOTH"
-      ]
+      ],
+      "runtimeVersion": "1.0.0"
     },
     "plugins": [
       [
@@ -49,6 +63,9 @@
       "eas": {
         "projectId": "ed3eaed6-ed87-4681-84ac-d6705ccf38f2"
       }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ed3eaed6-ed87-4681-84ac-d6705ccf38f2"
     }
   }
 }

@@ -1,3 +1,38 @@
+// ===================== MEDICINES API =====================
+/**
+ * Get medicines for a patient
+ * @param {string} patientId
+ */
+export const getPatientMedicines = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(patientId)}/medicines`);
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.medicines) ? data.medicines : [];
+};
+
+/**
+ * Add a new medicine for a patient
+ * @param {string} patientId
+ * @param {object} medicineData { name, dosage, time, ... }
+ */
+export const addPatientMedicine = async (patientId, medicineData) => {
+  const existingMedicines = await getPatientMedicines(patientId);
+  const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/medicines`, {
+    medicines: [...existingMedicines, medicineData],
+  });
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Mark a medicine as taken
+ * @param {string} patientId
+ * @param {string} medicineId
+ */
+export const markMedicineTaken = async (patientId, medicineId) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/medicines/${encodeURIComponent(medicineId)}/taken`, {
+    taken: true,
+  });
+  return unwrapEnvelope(response);
+};
 import axios from 'axios';
 import { fallbackPatients } from '../data/demoData';
 import { getAuthSession } from '../utils/auth';
@@ -40,27 +75,20 @@ const attachSessionHeaders = (config) => {
   if (session.token) {
     config.headers.Authorization = `Bearer ${session.token}`;
   }
-  if (session.role) {
-    config.headers['X-User-Role'] = session.role;
-  }
-  if (session.email) {
-    config.headers['X-User-Email'] = session.email;
-  }
-  if (session.role === 'patient' && session.patientId) {
-    config.headers['X-Patient-Id'] = session.patientId;
-  }
-  if (session.role === 'doctor' && session.email) {
-    config.headers['X-Doctor-Email'] = session.email;
-    if (session.phone) {
-      config.headers['X-Doctor-Phone'] = session.phone;
-    }
-  }
 
   return config;
 };
 
 api.interceptors.request.use(attachSessionHeaders);
 sosApi.interceptors.request.use(attachSessionHeaders);
+
+const unwrapEnvelope = (responseOrPayload) => {
+  const payload = responseOrPayload?.data !== undefined ? responseOrPayload.data : (responseOrPayload || {});
+  if (payload && payload.data && typeof payload.data === 'object') {
+    return payload.data;
+  }
+  return payload || {};
+};
 
 const toNumber = (value, fallback = 0) => {
   const numericValue = Number(value);
@@ -260,7 +288,7 @@ const buildPatientAccountPayload = ({
 export const getPatients = async () => {
   try {
     const response = await api.get('/patients');
-    const patients = extractPatientArray(response.data);
+    const patients = extractPatientArray(unwrapEnvelope(response));
 
     const normalizedPatients = patients.map(normalizePatient);
     writeLocalPatients(normalizedPatients);
@@ -271,7 +299,7 @@ export const getPatients = async () => {
 
   try {
     const response = await api.get('/real-data');
-    const patients = extractPatientArray(response.data?.data);
+    const patients = extractPatientArray(unwrapEnvelope(response));
 
     if (patients.length > 0) {
       const normalizedPatients = patients.map(normalizePatient);
@@ -300,7 +328,8 @@ export const addPatient = async (patientInput) => {
 
   try {
     const response = await api.post('/add-patient', payload);
-    const savedPatient = normalizePatient(response.data?.patient || response.data?.data || response.data || payload);
+    const data = unwrapEnvelope(response);
+    const savedPatient = normalizePatient(data?.patient || data || payload);
     savePatientLocally(savedPatient);
 
     return {
@@ -330,13 +359,14 @@ export const addPatient = async (patientInput) => {
 export const createPatientAccount = async (patientInput) => {
   const payload = buildPatientAccountPayload(patientInput);
   const response = await api.post('/add-patient', payload);
+  const data = unwrapEnvelope(response);
 
-  const patient = normalizePatient(response.data?.patient || payload);
+  const patient = normalizePatient(data?.patient || payload);
   savePatientLocally(patient);
 
   return {
     patient,
-    credentials: response.data?.credentials || null,
+    credentials: data?.credentials || null,
     message: response.data?.message || 'Patient created successfully.',
   };
 };
@@ -346,10 +376,11 @@ export const loginPatient = async ({ patientId, password }) => {
     patientId: toText(patientId),
     password: toText(password),
   });
+  const data = unwrapEnvelope(response);
 
   return {
-    patient: normalizePatient(response.data?.patient || {}),
-    auth: response.data?.auth || null,
+    patient: normalizePatient(data?.patient || {}),
+    auth: data?.auth || null,
   };
 };
 
@@ -360,9 +391,10 @@ export const signupDoctor = async ({ name, email, phone, password }) => {
     phone: toText(phone),
     password: toText(password),
   });
+  const data = unwrapEnvelope(response);
   return {
-    doctor: response.data?.doctor || null,
-    auth: response.data?.auth || null,
+    doctor: data?.doctor || null,
+    auth: data?.auth || null,
   };
 };
 
@@ -371,9 +403,10 @@ export const loginDoctor = async ({ email, password }) => {
     email: toText(email).toLowerCase(),
     password: toText(password),
   });
+  const data = unwrapEnvelope(response);
   return {
-    doctor: response.data?.doctor || null,
-    auth: response.data?.auth || null,
+    doctor: data?.doctor || null,
+    auth: data?.auth || null,
   };
 };
 
@@ -383,12 +416,13 @@ export const verifyFirebasePhoneToken = async ({ idToken, role }) => {
     role: toText(role).toLowerCase(),
   });
 
+  const data = unwrapEnvelope(response);
   return {
-    uid: toText(response.data?.uid),
-    phone: toText(response.data?.phone),
-    role: toText(response.data?.role),
-    auth: response.data?.auth || null,
-    user: response.data?.user || null,
+    uid: toText(data?.uid),
+    phone: toText(data?.phone),
+    role: toText(data?.role),
+    auth: data?.auth || null,
+    user: data?.user || null,
   };
 };
 
@@ -399,7 +433,7 @@ export const resetPasswordWithFirebasePhone = async ({ idToken, role, newPasswor
     newPassword: toText(newPassword),
     confirmPassword: toText(confirmPassword),
   });
-  return response.data;
+  return unwrapEnvelope(response);
 };
 
 export const updateDoctorProfile = async ({ name, email, phone }) => {
@@ -438,27 +472,28 @@ export const getPatientProfile = async (patientId) => {
 
 export const getApiPatientById = async (patientId) => {
   const response = await api.get(`/api/patient/${encodeURIComponent(patientId)}`);
-  return response.data?.data || null;
+  return unwrapEnvelope(response) || null;
 };
 
 export const connectPatientDevice = async (patientId) => {
   const response = await api.post(`/connect-device/${encodeURIComponent(patientId)}`);
-  return response.data?.data || null;
+  return unwrapEnvelope(response) || null;
 };
 
 export const disconnectPatientDevice = async (patientId) => {
   const response = await api.post(`/disconnect-device/${encodeURIComponent(patientId)}`);
-  return response.data?.data || null;
+  return unwrapEnvelope(response) || null;
 };
 
 export const getPatientPredictionAudit = async (patientId) => {
   const response = await api.get(`/api/patient/${encodeURIComponent(patientId)}/prediction-audit`);
-  return Array.isArray(response.data?.audit) ? response.data.audit : [];
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.audit) ? data.audit : [];
 };
 
 export const getPatientVitals = async (patientId) => {
   const response = await api.get(`/api/vitals/${encodeURIComponent(patientId)}`);
-  const payload = response.data?.data || response.data || {};
+  const payload = unwrapEnvelope(response);
 
   return {
     patientId: toText(payload.patientId || patientId),
@@ -483,7 +518,7 @@ export const updatePatientManualValues = async (patientId, input) => {
   }
 
   const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/manual-update`, payload);
-  return response.data?.data || null;
+  return unwrapEnvelope(response) || null;
 };
 
 export const predictVitals = async ({ heartRate, spo2, temperature }) => {
@@ -540,7 +575,7 @@ export const triggerSosAlert = async ({ patientId, heartRate, spo2, temperature 
 export const getChatThreadContext = async ({ patientId } = {}) => {
   const query = patientId ? `?patientId=${encodeURIComponent(toText(patientId))}` : '';
   const response = await api.get(`/chat/thread-context${query}`);
-  return response.data?.data || null;
+  return unwrapEnvelope(response) || null;
 };
 
 export const getChatMessages = async (threadId, { limit = 60, before = '' } = {}) => {
@@ -554,7 +589,8 @@ export const getChatMessages = async (threadId, { limit = 60, before = '' } = {}
 
   const query = params.toString() ? `?${params.toString()}` : '';
   const response = await api.get(`/chat/threads/${encodeURIComponent(toText(threadId))}/messages${query}`);
-  return Array.isArray(response.data?.messages) ? response.data.messages : [];
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.messages) ? data.messages : [];
 };
 
 export const sendChatMessage = async ({ threadId, text, receiverId = '' }) => {
@@ -562,14 +598,16 @@ export const sendChatMessage = async ({ threadId, text, receiverId = '' }) => {
     text: toText(text),
     receiverId: toText(receiverId),
   });
-  return response.data?.message || null;
+  const data = unwrapEnvelope(response);
+  return data?.message || null;
 };
 
 export const markChatMessageRead = async ({ messageId, threadId }) => {
   const response = await api.patch(`/chat/messages/${encodeURIComponent(toText(messageId))}/read`, {
     threadId: toText(threadId),
   });
-  return response.data?.message || null;
+  const data = unwrapEnvelope(response);
+  return data?.message || null;
 };
 
 export const submitContactMessage = async (formData) => {

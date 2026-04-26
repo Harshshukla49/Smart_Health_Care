@@ -12,6 +12,11 @@ function toNumber(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function unwrapEnvelope(response) {
+  const payload = response?.data || {};
+  return payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+}
+
 export function normalizeChatMessage(row = {}) {
   return {
     id: toText(row.id),
@@ -30,7 +35,7 @@ export function normalizeChatMessage(row = {}) {
 export async function getChatThreadContext({ patientId } = {}) {
   const query = patientId ? `?patientId=${encodeURIComponent(toText(patientId))}` : '';
   const response = await apiClient.get(`/chat/thread-context${query}`);
-  return response?.data?.data || null;
+  return unwrapEnvelope(response) || null;
 }
 
 export async function getChatMessages(threadId, { limit = 60, before = '' } = {}) {
@@ -44,7 +49,8 @@ export async function getChatMessages(threadId, { limit = 60, before = '' } = {}
 
   const query = params.toString() ? `?${params.toString()}` : '';
   const response = await apiClient.get(`/chat/threads/${encodeURIComponent(toText(threadId))}/messages${query}`);
-  const rows = Array.isArray(response?.data?.messages) ? response.data.messages : [];
+  const payload = unwrapEnvelope(response);
+  const rows = Array.isArray(payload?.messages) ? payload.messages : [];
   return rows.map(normalizeChatMessage);
 }
 
@@ -54,7 +60,8 @@ export async function sendChatMessage({ threadId, text, receiverId = '' }) {
     receiverId: toText(receiverId),
   });
 
-  return normalizeChatMessage(response?.data?.message || {});
+  const payload = unwrapEnvelope(response);
+  return normalizeChatMessage(payload?.message || {});
 }
 
 export async function markChatMessageRead({ messageId, threadId }) {
@@ -62,7 +69,8 @@ export async function markChatMessageRead({ messageId, threadId }) {
     threadId: toText(threadId),
   });
 
-  return normalizeChatMessage(response?.data?.message || {});
+  const payload = unwrapEnvelope(response);
+  return normalizeChatMessage(payload?.message || {});
 }
 
 export function toCallSummary(payload = {}) {

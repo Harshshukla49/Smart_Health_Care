@@ -19,27 +19,6 @@ function attachSessionHeaders(config) {
     config.headers.Authorization = `Bearer ${session.token}`;
   }
 
-  if (session.role) {
-    config.headers['X-User-Role'] = session.role;
-  }
-
-  if (session.email) {
-    config.headers['X-User-Email'] = session.email;
-  }
-
-  if (session.role === 'patient' && session.patientId) {
-    config.headers['X-Patient-Id'] = session.patientId;
-  }
-
-  if (session.role === 'doctor') {
-    if (session.email) {
-      config.headers['X-Doctor-Email'] = session.email;
-    }
-    if (session.phone) {
-      config.headers['X-Doctor-Phone'] = session.phone;
-    }
-  }
-
   return config;
 }
 

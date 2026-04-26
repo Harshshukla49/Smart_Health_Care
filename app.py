@@ -1,3 +1,4 @@
+from flask import abort
 import os
 import random
 import smtplib
@@ -5,7 +6,9 @@ import secrets
 import string
 import time
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from pathlib import Path
+import uuid
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -107,6 +110,40 @@ socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 dataset_vitals_rows = []
 sensor_adapter = None
+
+
+def _utc_now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _request_meta():
+    return {
+        'timestamp': _utc_now_iso(),
+        'requestId': getattr(request, 'request_id', ''),
+    }
+
+
+def api_success(message='OK', data=None, status_code=200):
+    return jsonify({
+        'status': 'success',
+        'message': str(message or 'OK'),
+        'data': data if data is not None else {},
+        'meta': _request_meta(),
+    }), status_code
+
+
+def api_error(message='Request failed.', status_code=400, data=None):
+    return jsonify({
+        'status': 'error',
+        'message': str(message or 'Request failed.'),
+        'data': data if data is not None else {},
+        'meta': _request_meta(),
+    }), status_code
+
+
+@app.before_request
+def _set_request_id():
+    request.request_id = str(uuid.uuid4())
 
 
 def _normalize_dataset_row(row):
@@ -252,20 +289,108 @@ def send_html_email(to_email, subject, html_body):
                 pass
 
 
+# --- Medicines Storage Helper ---
+
+def _get_patient_medicines(patient_id):
+    key = str(patient_id or '').strip()
+    if not key:
+        return None, 'Patient ID is required.'
+    record = _patient_collection_reference().child(key).get()
+    if not record:
+        return None, 'Patient not found.'
+    medicines = record.get('medicines', [])
+    # Ensure each medicine has an id
+    for idx, med in enumerate(medicines):
+        if 'id' not in med:
+            med['id'] = str(idx)
+    return medicines, None
+
+def _set_patient_medicines(patient_id, medicines):
+    key = str(patient_id or '').strip()
+    if not key:
+        return False, 'Patient ID is required.'
+    ref = _patient_collection_reference().child(key)
+    record = ref.get()
+    if not record:
+        return False, 'Patient not found.'
+    ref.update({'medicines': medicines})
+    return True, None
+
+# --- API: Patient Medicines ---
+@app.route('/api/patient/<patient_id>/medicines', methods=['GET', 'POST'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def patient_medicines(patient_id):
+    if request.method == 'GET':
+        medicines, error = _get_patient_medicines(patient_id)
+        if error:
+            return api_error(error, 404)
+        return api_success('Medicines fetched successfully.', {'medicines': medicines})
+
+    if request.method == 'POST':
+        # Only allow doctor to add/update medicines
+        if _request_user_role() != 'doctor':
+            return api_error('Only doctor can update medicines.', 403)
+        data = request.get_json(silent=True) or {}
+        medicines = data.get('medicines')
+        if not isinstance(medicines, list):
+            return api_error('Medicines must be a list.', 400)
+        # Assign IDs if missing
+        for idx, med in enumerate(medicines):
+            if 'id' not in med:
+                med['id'] = str(idx)
+        ok, error = _set_patient_medicines(patient_id, medicines)
+        if not ok:
+            return api_error(error, 404)
+        return api_success('Medicines updated.', {'medicines': medicines})
+
+
+@app.route('/api/patient/<patient_id>/medicines/<medicine_id>/taken', methods=['POST'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def mark_patient_medicine_taken(patient_id, medicine_id):
+    if request.method != 'POST':
+        return api_error('Method not allowed.', 405)
+
+    medicines, error = _get_patient_medicines(patient_id)
+    if error:
+        return api_error(error, 404)
+
+    payload = request.get_json(silent=True) or {}
+    taken_value = payload.get('taken')
+    if not isinstance(taken_value, bool):
+        return api_error('Field "taken" is required and must be a boolean.', 400)
+    taken = taken_value
+
+    updated = False
+    for medicine in medicines:
+        if str(medicine.get('id', '')).strip() == str(medicine_id).strip():
+            medicine['taken'] = taken
+            medicine['takenAt'] = _utc_now_iso()
+            updated = True
+            break
+
+    if not updated:
+        return api_error('Medicine not found.', 404)
+
+    ok, write_error = _set_patient_medicines(patient_id, medicines)
+    if not ok:
+        return api_error(write_error, 404)
+
+    return api_success('Medicine status updated.', {'medicines': medicines})
+
 @app.errorhandler(400)
 def handle_bad_request(error):
     description = getattr(error, "description", None) or "Bad request"
-    return jsonify({"error": "Bad request", "message": str(description)}), 400
+    return api_error(str(description), 400)
 
 
 @app.errorhandler(500)
 def handle_internal_error(error):
-    return jsonify({"error": "Internal server error", "message": "An unexpected error occurred."}), 500
+    return api_error("An unexpected error occurred.", 500)
 
 
 @app.errorhandler(ValueError)
 def handle_value_error(error):
-    return jsonify({"error": "Invalid input", "message": str(error)}), 400
+    return api_error(str(error), 400)
 
 
 def _coerce_float(value, default=0.0):
@@ -756,15 +881,15 @@ def verify_firebase_phone_token_route():
     data = request.get_json(silent=True) or {}
     role = _normalize_role(data.get('role'))
     if role not in ('doctor', 'patient'):
-        return jsonify({'status': 'error', 'message': 'Role must be doctor or patient.'}), 400
+        return api_error('Role must be doctor or patient.', 400)
 
     verified, message, status_code = _verify_firebase_phone_token(data.get('idToken'))
     if not verified:
-        return jsonify({'status': 'error', 'message': message}), status_code
+        return api_error(message, status_code)
 
     account, account_message, account_status = _resolve_reset_account(verified['phone'], role)
     if not account:
-        return jsonify({'status': 'error', 'message': account_message}), account_status
+        return api_error(account_message, account_status)
 
     now_iso = datetime.now(timezone.utc).isoformat()
     user_ref = _firestore_user_document(verified['uid'])
@@ -791,8 +916,7 @@ def verify_firebase_phone_token_route():
         'patientId': account.get('userKey') if role == 'patient' else '',
     })
 
-    return jsonify({
-        'status': 'success',
+    return api_success('Phone token verified.', {
         'uid': verified['uid'],
         'phone': verified['phone'],
         'role': role,
@@ -809,31 +933,31 @@ def reset_password_with_firebase_phone():
     confirm_password = str(data.get('confirmPassword') or '')
 
     if role not in ('doctor', 'patient'):
-        return jsonify({'status': 'error', 'message': 'Role must be doctor or patient.'}), 400
+        return api_error('Role must be doctor or patient.', 400)
 
     if not new_password or not confirm_password:
-        return jsonify({'status': 'error', 'message': 'New password and confirm password are required.'}), 400
+        return api_error('New password and confirm password are required.', 400)
 
     if new_password != confirm_password:
-        return jsonify({'status': 'error', 'message': 'Password mismatch. Please check both fields.'}), 400
+        return api_error('Password mismatch. Please check both fields.', 400)
 
     strength_errors = _password_strength_errors(new_password)
     if strength_errors:
-        return jsonify({'status': 'error', 'message': strength_errors[0], 'errors': strength_errors}), 400
+        return api_error(strength_errors[0], 400, {'errors': strength_errors})
 
     verified, message, status_code = _verify_firebase_phone_token(data.get('idToken'))
     if not verified:
-        return jsonify({'status': 'error', 'message': message}), status_code
+        return api_error(message, status_code)
 
     account, account_message, account_status = _resolve_reset_account(verified['phone'], role)
     if not account:
-        return jsonify({'status': 'error', 'message': account_message}), account_status
+        return api_error(account_message, account_status)
 
     if role == 'doctor':
         doctor_ref = _doctor_collection_reference().child(account['storageKey'])
         doctor = doctor_ref.get()
         if not isinstance(doctor, dict):
-            return jsonify({'status': 'error', 'message': 'Doctor account not found.'}), 404
+            return api_error('Doctor account not found.', 404)
 
         doctor_ref.update({
             'passwordHash': generate_password_hash(new_password),
@@ -843,14 +967,14 @@ def reset_password_with_firebase_phone():
         patient_ref = _patient_collection_reference().child(account['userKey'])
         patient_record = patient_ref.get()
         if not isinstance(patient_record, dict):
-            return jsonify({'status': 'error', 'message': 'Patient account not found.'}), 404
+            return api_error('Patient account not found.', 404)
 
         patient_ref.update({
             'password': new_password,
             'updatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         })
 
-    return jsonify({'status': 'success', 'message': 'Password updated successfully.'})
+    return api_success('Password updated successfully.')
 
 
 def _issue_auth_token(payload):
@@ -877,20 +1001,25 @@ def _read_auth_payload():
         return {}
 
 
+def _require_auth_payload():
+    payload = _read_auth_payload()
+    if not payload:
+        return None, api_error('Unauthorized. Valid auth token is required.', 401)
+    return payload, None
+
+
 def _request_user_role():
     payload = _read_auth_payload()
     if payload.get('role'):
         return str(payload.get('role')).strip().lower()
-
-    return str(request.headers.get('X-User-Role') or '').strip().lower()
+    return ''
 
 
 def _request_patient_id():
     payload = _read_auth_payload()
     if payload.get('role') == 'patient' and payload.get('patientId'):
         return str(payload.get('patientId')).strip()
-
-    return str(request.headers.get('X-Patient-Id') or '').strip()
+    return ''
 
 
 def _request_doctor_id(payload=None):
@@ -902,11 +1031,6 @@ def _request_doctor_id(payload=None):
         from_payload = payload.get('doctorId') or payload.get('doctorEmail')
         if from_payload:
             return str(from_payload).strip().lower()
-
-    for key in ('X-Doctor-Email', 'X-User-Email'):
-        value = request.headers.get(key)
-        if value:
-            return str(value).strip().lower()
 
     return ''
 
@@ -921,11 +1045,46 @@ def _request_doctor_phone(payload=None):
         if from_payload:
             return str(from_payload).strip()
 
-    value = request.headers.get('X-Doctor-Phone')
-    if value:
-        return str(value).strip()
-
     return ''
+
+
+def require_auth(roles=None, patient_id_arg=None):
+    allowed_roles = {str(role).strip().lower() for role in (roles or []) if str(role).strip()}
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            payload, auth_error = _require_auth_payload()
+            if auth_error:
+                return auth_error
+
+            role = str(payload.get('role') or '').strip().lower()
+            if allowed_roles and role not in allowed_roles:
+                return api_error('Forbidden. You are not authorized to perform this action.', 403)
+
+            if patient_id_arg:
+                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
+                if role == 'patient':
+                    requester_patient_id = str(payload.get('patientId') or '').strip()
+                    if not requester_patient_id or requester_patient_id != target_patient_id:
+                        return api_error('Access denied for this patient record.', 403)
+
+                if role == 'doctor':
+                    doctor_id = str(payload.get('email') or '').strip().lower()
+                    if not doctor_id:
+                        return api_error('Forbidden. Doctor context is missing from token.', 403)
+
+                    record = _patient_collection_reference().child(target_patient_id).get()
+                    if not isinstance(record, dict):
+                        return api_error('Patient not found.', 404)
+                    if not _doctor_owns_record(record, doctor_id):
+                        return api_error('Access denied for this patient record.', 403)
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def _decode_auth_token(token):
@@ -1824,18 +1983,18 @@ def doctor_signup():
         password = str(data.get('password') or '')
 
         if not email or not phone or len(password) < 6:
-            return jsonify({'status': 'error', 'message': 'Name, email, phone, and password (min 6 chars) are required.'}), 400
+            return api_error('Name, email, phone, and password (min 6 chars) are required.', 400)
 
         if not _normalize_phone(phone):
-            return jsonify({'status': 'error', 'message': 'Valid doctor phone number is required.'}), 400
+            return api_error('Valid doctor phone number is required.', 400)
 
         doctor_ref = _doctor_collection_reference().child(email.replace('.', ','))
         existing = doctor_ref.get()
         if existing:
-            return jsonify({'status': 'error', 'message': 'Doctor account already exists for this email.'}), 409
+            return api_error('Doctor account already exists for this email.', 409)
 
         if _doctor_matches_by_phone(phone):
-            return jsonify({'status': 'error', 'message': 'Doctor account already exists for this phone number.'}), 409
+            return api_error('Doctor account already exists for this phone number.', 409)
 
         doctor_ref.set({
             'id': email,
@@ -1853,13 +2012,12 @@ def doctor_signup():
             'phone': phone,
         })
 
-        return jsonify({
-            'status': 'success',
+        return api_success('Doctor signup successful.', {
             'doctor': {'id': email, 'name': name, 'email': email, 'phone': phone},
             'auth': auth,
         })
     except Exception as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/doctor/login', methods=['POST'])
@@ -1870,15 +2028,15 @@ def doctor_login():
         password = str(data.get('password') or '')
 
         if not email or not password:
-            return jsonify({'status': 'error', 'message': 'Email and password are required.'}), 400
+            return api_error('Email and password are required.', 400)
 
         doctor = _doctor_collection_reference().child(email.replace('.', ',')).get()
         if not doctor:
-            return jsonify({'status': 'error', 'message': 'Invalid email or password.'}), 401
+            return api_error('Invalid email or password.', 401)
 
         password_hash = str((doctor or {}).get('passwordHash') or '')
         if not password_hash or not check_password_hash(password_hash, password):
-            return jsonify({'status': 'error', 'message': 'Invalid email or password.'}), 401
+            return api_error('Invalid email or password.', 401)
 
         doctor_name = doctor.get('name') or email.split('@')[0]
         doctor_phone = doctor.get('phone') or ''
@@ -1889,8 +2047,7 @@ def doctor_login():
             'phone': doctor_phone,
         })
 
-        return jsonify({
-            'status': 'success',
+        return api_success('Doctor login successful.', {
             'doctor': {
                 'id': email,
                 'name': doctor_name,
@@ -1900,7 +2057,7 @@ def doctor_login():
             'auth': auth,
         })
     except Exception as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/doctor/profile/update', methods=['POST'])
@@ -2388,24 +2545,15 @@ def login_patient():
         password = str(data.get('password') or '').strip()
 
         if not patient_id or not password:
-            return jsonify({
-                'status': 'error',
-                'message': 'Patient ID and password are required.',
-            }), 400
+            return api_error('Patient ID and password are required.', 400)
 
         record = _patient_collection_reference().child(patient_id).get()
         if not record:
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid Patient ID or password.',
-            }), 401
+            return api_error('Invalid Patient ID or password.', 401)
 
         stored_password = str((record or {}).get('password') or '')
         if stored_password != password:
-            return jsonify({
-                'status': 'error',
-                'message': 'Invalid Patient ID or password.',
-            }), 401
+            return api_error('Invalid Patient ID or password.', 401)
 
         normalized = _normalize_patient_record(patient_id, record, record)
         auth = _issue_auth_token({
@@ -2415,20 +2563,16 @@ def login_patient():
             'email': normalized.get('email') or '',
             'phone': normalized.get('phone') or '',
         })
-        return jsonify({
-            'status': 'success',
-            'message': 'Patient login successful.',
+        return api_success('Patient login successful.', {
             'patient': _sanitize_patient_response(normalized),
             'auth': auth,
         })
     except Exception as error:
-        return jsonify({
-            'status': 'error',
-            'message': str(error),
-        }), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/patient/<patient_id>', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
 def get_patient_by_id(patient_id):
     try:
         key = str(patient_id or '').strip()
@@ -2462,72 +2606,47 @@ def get_patient_by_id(patient_id):
                 }), 403
 
         normalized = _normalize_patient_record(key, record, record)
-        return jsonify({
-            'status': 'success',
-            'patient': _sanitize_patient_response(normalized),
-        })
+        return api_success('Patient fetched successfully.', {'patient': _sanitize_patient_response(normalized)})
     except Exception as error:
-        return jsonify({
-            'status': 'error',
-            'message': str(error),
-        }), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/api/patient/<patient_id>', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
 def get_api_patient(patient_id):
     try:
         key = str(patient_id or '').strip()
         if not key:
-            return jsonify({'status': 'error', 'message': 'Patient ID is required.'}), 400
+            return api_error('Patient ID is required.', 400)
 
         record = _patient_collection_reference().child(key).get()
         if not record:
-            return jsonify({'status': 'error', 'message': 'Patient not found.'}), 404
-
-        if _request_user_role() == 'patient':
-            requester_patient_id = _request_patient_id()
-            if not requester_patient_id or str(requester_patient_id) != str(key):
-                return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
-
-        if _request_user_role() == 'doctor':
-            doctor_id = _request_doctor_id()
-            if not _doctor_owns_record(record, doctor_id):
-                return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
+            return api_error('Patient not found.', 404)
 
         if bool((record or {}).get('deviceConnected')):
             normalized_existing = _normalize_patient_record(key, record, record)
-            return jsonify({
-                'status': 'success',
-                'message': 'Device already connected.',
-                'data': _build_patient_payload_response(key, normalized_existing),
-            })
+            return api_success(
+                'Device already connected.',
+                _build_patient_payload_response(key, normalized_existing),
+            )
 
         normalized = _normalize_patient_record(key, record, record)
-        return jsonify({
-            'status': 'success',
-            'data': _build_patient_payload_response(key, normalized),
-        })
+        return api_success('Patient fetched successfully.', _build_patient_payload_response(key, normalized))
     except Exception as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/api/patient/<patient_id>/manual-update', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
 def manual_update_patient(patient_id):
     try:
         key = str(patient_id or '').strip()
         if not key:
-            return jsonify({'status': 'error', 'message': 'Patient ID is required.'}), 400
+            return api_error('Patient ID is required.', 400)
 
         record = _patient_collection_reference().child(key).get()
         if not record:
-            return jsonify({'status': 'error', 'message': 'Patient not found.'}), 404
-
-        if _request_user_role() != 'doctor':
-            return jsonify({'status': 'error', 'message': 'Only doctor can manually update patient values.'}), 403
-
-        doctor_id = _request_doctor_id()
-        if not _doctor_owns_record(record, doctor_id):
-            return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
+            return api_error('Patient not found.', 404)
 
         data = request.get_json(silent=True) or {}
         normalized = _normalize_patient_record(key, record, record)
@@ -2582,15 +2701,11 @@ def manual_update_patient(patient_id):
             'prediction': payload['prediction'],
         }, to=_patient_room(key))
 
-        return jsonify({
-            'status': 'success',
-            'message': 'Patient values updated and prediction refreshed.',
-            'data': payload,
-        })
+        return api_success('Patient values updated and prediction refreshed.', payload)
     except ValueError as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 400
+        return api_error(str(error), 400)
     except Exception as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/connect-device/<patient_id>', methods=['POST'])
@@ -2668,25 +2783,24 @@ def get_patient_prediction_audit(patient_id):
     try:
         key = str(patient_id or '').strip()
         if not key:
-            return jsonify({'status': 'error', 'message': 'Patient ID is required.'}), 400
+            return api_error('Patient ID is required.', 400)
 
         record = _patient_collection_reference().child(key).get()
         if not record:
-            return jsonify({'status': 'error', 'message': 'Patient not found.'}), 404
+            return api_error('Patient not found.', 404)
 
         if _request_user_role() == 'doctor':
             doctor_id = _request_doctor_id()
             if not _doctor_owns_record(record, doctor_id):
-                return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
+                return api_error('Access denied for this patient record.', 403)
 
         normalized = _normalize_patient_record(key, record, record)
-        return jsonify({
-            'status': 'success',
+        return api_success('Prediction audit fetched successfully.', {
             'patientId': key,
             'audit': list(normalized.get('predictionAudit') or [])[-100:],
         })
     except Exception as error:
-        return jsonify({'status': 'error', 'message': str(error)}), 500
+        return api_error(str(error), 500)
 
 
 @app.route('/api/vitals/<patient_id>', methods=['GET'])
@@ -3114,7 +3228,7 @@ def reset_doctor_password():
 def get_chat_thread_context():
     actor = _chat_resolve_http_actor()
     if not actor:
-        return jsonify({'status': 'error', 'message': 'Unauthorized. Valid auth token is required.'}), 401
+        return api_error('Unauthorized. Valid auth token is required.', 401)
 
     role = str(actor.get('role') or '').strip().lower()
     doctor_id = ''
@@ -3143,7 +3257,7 @@ def get_chat_thread_context():
                     break
 
         if not patient_id:
-            return jsonify({'status': 'error', 'message': 'No linked patient found. Pass patientId for doctor chat.'}), 400
+            return api_error('No linked patient found. Pass patientId for doctor chat.', 400)
 
         patient_record = _chat_get_patient_record(patient_id)
         if isinstance(patient_record, dict):
@@ -3155,11 +3269,11 @@ def get_chat_thread_context():
         patient_id = str(actor.get('id') or '').strip()
         patient_record = _chat_get_patient_record(patient_id)
         if not isinstance(patient_record, dict):
-            return jsonify({'status': 'error', 'message': 'Patient record not found.'}), 404
+            return api_error('Patient record not found.', 404)
 
         doctor_id = str(patient_record.get('doctorId') or patient_record.get('doctorEmail') or '').strip().lower()
         if not doctor_id:
-            return jsonify({'status': 'error', 'message': 'Doctor is not linked to this patient yet.'}), 400
+            return api_error('Doctor is not linked to this patient yet.', 400)
 
         doctor_record = _doctor_collection_reference().child(doctor_id.replace('.', ',')).get()
         doctor_name = str((doctor_record or {}).get('name') or doctor_id or 'Doctor').strip()
@@ -3173,27 +3287,24 @@ def get_chat_thread_context():
 
     allowed, reason = _chat_authorize(actor, doctor_id, patient_id)
     if not allowed:
-        return jsonify({'status': 'error', 'message': reason}), 403
+        return api_error(reason, 403)
 
     thread_id = _chat_thread_id(doctor_id, patient_id)
     meta = _chat_upsert_thread_meta(thread_id, doctor_id, patient_id)
     partner_role = 'patient' if role == 'doctor' else 'doctor'
     partner_presence = _chat_partner_presence(partner_role, partner.get('id'))
 
-    return jsonify({
-        'status': 'success',
-        'data': {
-            'threadId': thread_id,
-            'doctorId': doctor_id,
-            'patientId': patient_id,
-            'partnerRole': partner_role,
-            'partnerId': partner.get('id') or '',
-            'partnerName': partner.get('name') or (partner.get('id') or partner_role.title()),
-            'partnerEmail': partner.get('email') or '',
-            'partnerPhone': partner.get('phone') or '',
-            'partnerPresence': partner_presence,
-            'meta': meta,
-        },
+    return api_success('Thread context fetched successfully.', {
+        'threadId': thread_id,
+        'doctorId': doctor_id,
+        'patientId': patient_id,
+        'partnerRole': partner_role,
+        'partnerId': partner.get('id') or '',
+        'partnerName': partner.get('name') or (partner.get('id') or partner_role.title()),
+        'partnerEmail': partner.get('email') or '',
+        'partnerPhone': partner.get('phone') or '',
+        'partnerPresence': partner_presence,
+        'meta': meta,
     })
 
 
@@ -3201,17 +3312,17 @@ def get_chat_thread_context():
 def get_chat_messages(thread_id):
     actor = _chat_resolve_http_actor()
     if not actor:
-        return jsonify({'status': 'error', 'message': 'Unauthorized. Valid auth token is required.'}), 401
+        return api_error('Unauthorized. Valid auth token is required.', 401)
 
     meta = _chat_get_thread_meta(thread_id)
     if not meta:
-        return jsonify({'status': 'error', 'message': 'Thread not found.'}), 404
+        return api_error('Thread not found.', 404)
 
     doctor_id = str(meta.get('doctorId') or '').strip().lower()
     patient_id = str(meta.get('patientId') or '').strip()
     allowed, reason = _chat_authorize(actor, doctor_id, patient_id)
     if not allowed:
-        return jsonify({'status': 'error', 'message': reason}), 403
+        return api_error(reason, 403)
 
     try:
         limit = int(request.args.get('limit') or CHAT_HISTORY_DEFAULT_LIMIT)
@@ -3220,14 +3331,14 @@ def get_chat_messages(thread_id):
 
     before = str(request.args.get('before') or '').strip()
     rows = _chat_list_messages(thread_id, limit=limit, before=before)
-    return jsonify({'status': 'success', 'threadId': thread_id, 'messages': rows})
+    return api_success('Messages fetched successfully.', {'threadId': thread_id, 'messages': rows})
 
 
 @app.route('/chat/threads/<thread_id>/messages', methods=['POST'])
 def post_chat_message(thread_id):
     actor = _chat_resolve_http_actor()
     if not actor:
-        return jsonify({'status': 'error', 'message': 'Unauthorized. Valid auth token is required.'}), 401
+        return api_error('Unauthorized. Valid auth token is required.', 401)
 
     payload = request.get_json(silent=True) or {}
     message, reason, status = _chat_create_message(
@@ -3237,26 +3348,26 @@ def post_chat_message(thread_id):
         payload.get('receiverId'),
     )
     if not message:
-        return jsonify({'status': 'error', 'message': reason}), status
+        return api_error(reason, status)
 
     socketio.emit('chat:new_message', message, to=_chat_room(thread_id))
-    return jsonify({'status': 'success', 'message': message})
+    return api_success('Message sent successfully.', {'message': message})
 
 
 @app.route('/chat/messages/<message_id>/read', methods=['PATCH'])
 def patch_chat_message_read(message_id):
     actor = _chat_resolve_http_actor()
     if not actor:
-        return jsonify({'status': 'error', 'message': 'Unauthorized. Valid auth token is required.'}), 401
+        return api_error('Unauthorized. Valid auth token is required.', 401)
 
     payload = request.get_json(silent=True) or {}
     thread_id = str(payload.get('threadId') or '').strip()
     if not thread_id:
-        return jsonify({'status': 'error', 'message': 'threadId is required.'}), 400
+        return api_error('threadId is required.', 400)
 
     message, reason, status = _chat_mark_message_read(actor, thread_id, message_id)
     if not message:
-        return jsonify({'status': 'error', 'message': reason}), status
+        return api_error(reason, status)
 
     socketio.emit('chat:message_read', {
         'threadId': thread_id,
@@ -3264,7 +3375,7 @@ def patch_chat_message_read(message_id):
         'readAt': message.get('readAt') or '',
         'status': 'read',
     }, to=_chat_room(thread_id))
-    return jsonify({'status': 'success', 'message': message})
+    return api_success('Message marked as read.', {'message': message})
 
 
 @socketio.on('connect')

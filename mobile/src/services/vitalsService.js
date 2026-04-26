@@ -16,6 +16,11 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function unwrapEnvelope(response) {
+  const payload = response?.data || {};
+  return payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+}
+
 export function normalizeVitals(payload = {}) {
   return {
     patientId: toText(payload.patientId),
@@ -55,13 +60,14 @@ export function normalizeAuditEntry(entry = {}) {
 
 export async function getPatientVitals(patientId) {
   const response = await apiClient.get(`/api/vitals/${encodeURIComponent(String(patientId || '').trim())}`);
-  const payload = response?.data?.data || response?.data || {};
+  const payload = unwrapEnvelope(response);
   return normalizeVitals(payload);
 }
 
 export async function getPatientPredictionAudit(patientId) {
   const response = await apiClient.get(`/api/patient/${encodeURIComponent(String(patientId || '').trim())}/prediction-audit`);
-  const rows = Array.isArray(response?.data?.audit) ? response.data.audit : [];
+  const payload = unwrapEnvelope(response);
+  const rows = Array.isArray(payload?.audit) ? payload.audit : [];
   return rows.map(normalizeAuditEntry);
 }
 
@@ -72,5 +78,5 @@ export async function predictRiskForVitals({ heartRate, spo2, temperature }) {
     temperature: toNumber(temperature),
   });
 
-  return normalizePrediction(response?.data || {});
+  return normalizePrediction(unwrapEnvelope(response));
 }

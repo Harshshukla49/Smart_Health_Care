@@ -60,7 +60,12 @@ export function PatientListScreen({ navigation }) {
   return (
     <SafeAreaView style={styles.safeArea}>
       <View style={styles.container}>
-        <Text style={styles.title}>Patients</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Patients</Text>
+          <Pressable style={styles.addButton} onPress={() => navigation.navigate('AddPatient')}>
+            <Text style={styles.addButtonText}>+ Add Patient</Text>
+          </Pressable>
+        </View>
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         <FlatList
@@ -83,9 +88,23 @@ export function PatientListScreen({ navigation }) {
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: colors.background },
   container: { flex: 1, padding: 16 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+    gap: 10,
+  },
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 10 },
   loadingText: { color: colors.textSecondary },
-  title: { fontSize: 28, fontWeight: '700', color: colors.textPrimary, marginBottom: 10 },
+  title: { fontSize: 28, fontWeight: '700', color: colors.textPrimary },
+  addButton: {
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: colors.primary,
+  },
+  addButtonText: { color: '#fff', fontWeight: '700', fontSize: 12 },
   error: { color: colors.danger, marginBottom: 10 },
   empty: { color: colors.textSecondary, textAlign: 'center', marginTop: 30 },
   row: {

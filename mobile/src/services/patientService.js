@@ -16,6 +16,17 @@ function toArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+function unwrapEnvelope(response) {
+  const payload = response?.data || {};
+  return payload?.data && typeof payload.data === 'object' ? payload.data : payload;
+}
+
+export async function getPatientMedicines(patientId) {
+  const response = await apiClient.get(`/api/patient/${encodeURIComponent(String(patientId || '').trim())}/medicines`);
+  const payload = unwrapEnvelope(response);
+  return toArray(payload?.medicines || []);
+}
+
 export function normalizePatient(patient = {}) {
   return {
     id: toText(patient.id || patient.patientId || patient._id, ''),
@@ -33,6 +44,7 @@ export function normalizePatient(patient = {}) {
     temperature: toNumber(patient.temperature ?? patient.temp ?? patient.vitals?.temperature),
     updatedAt: toText(patient.updatedAt || patient.timestamp || patient.vitals?.updatedAt),
     ecgData: toArray(patient.ecgData || patient.vitals?.ecgData),
+    medicines: toArray(patient.medicines || []),
   };
 }
 
@@ -58,11 +70,30 @@ function extractPatientArray(payload) {
 
 export async function getPatients() {
   const response = await apiClient.get('/patients');
-  const rows = extractPatientArray(response?.data);
+  const rows = extractPatientArray(unwrapEnvelope(response));
   return rows.map(normalizePatient);
 }
 
 export async function getPatientById(patientId) {
   const response = await apiClient.get(`/api/patient/${encodeURIComponent(String(patientId || '').trim())}`);
-  return normalizePatient(response?.data?.data || response?.data?.patient || response?.data || {});
+  const payload = unwrapEnvelope(response);
+  return normalizePatient(payload?.patient || payload || {});
+}
+
+export async function updatePatientMedicines(patientId, medicines) {
+  const response = await apiClient.post(`/api/patient/${encodeURIComponent(String(patientId || '').trim())}/medicines`, { medicines: toArray(medicines) });
+  // Refetch to get updated normalized list
+  return getPatientMedicines(patientId);
+}
+
+export async function createPatient(payload) {
+  const response = await apiClient.post('/add-patient', payload || {});
+  const envelope = response?.data || {};
+  const data = unwrapEnvelope(response);
+  const patient = data?.patient || data || {};
+  return {
+    patient: normalizePatient(patient),
+    credentials: data?.credentials || null,
+    message: envelope?.message || 'Patient created successfully.',
+  };
 }

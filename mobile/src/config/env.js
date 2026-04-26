@@ -1,5 +1,6 @@
 const DEFAULT_API_BASE_URL = process.env.EXPO_PUBLIC_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 const DEFAULT_SOS_API_BASE_URL = process.env.EXPO_PUBLIC_SOS_API_BASE_URL || 'http://localhost:5001';
+const DEFAULT_WEB_APP_URL = process.env.EXPO_PUBLIC_WEB_APP_URL || 'https://smart-health-rontend.onrender.com';
 
 function resolveForPhysicalDevice(rawUrl) {
 	if (!rawUrl) {
@@ -26,3 +27,4 @@ function resolveForPhysicalDevice(rawUrl) {
 
 export const API_BASE_URL = resolveForPhysicalDevice(DEFAULT_API_BASE_URL);
 export const SOS_API_BASE_URL = resolveForPhysicalDevice(DEFAULT_SOS_API_BASE_URL);
+export const WEB_APP_URL = resolveForPhysicalDevice(DEFAULT_WEB_APP_URL);
