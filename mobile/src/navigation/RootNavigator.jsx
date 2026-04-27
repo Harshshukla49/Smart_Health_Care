@@ -7,6 +7,7 @@ import { PublicHomeScreen } from '../screens/public/PublicHomeScreen';
 import { PublicBlogScreen } from '../screens/public/PublicBlogScreen';
 import { PublicContactScreen } from '../screens/public/PublicContactScreen';
 import { LoginSelectionScreen } from '../screens/auth/LoginSelectionScreen';
+import { SplashScreen } from '../screens/auth/SplashScreen';
 import { DoctorLoginScreen } from '../screens/auth/DoctorLoginScreen';
 import { PatientLoginScreen } from '../screens/auth/PatientLoginScreen';
 import { DoctorSignupScreen } from '../screens/auth/DoctorSignupScreen';
@@ -62,10 +63,8 @@ function PatientTabs() {
 
 function AuthStack() {
   return (
-    <Stack.Navigator initialRouteName="PublicHome">
-      <Stack.Screen name="PublicHome" component={PublicHomeScreen} options={{ title: 'Home' }} />
-      <Stack.Screen name="PublicBlog" component={PublicBlogScreen} options={{ title: 'Blog' }} />
-      <Stack.Screen name="PublicContact" component={PublicContactScreen} options={{ title: 'Contact' }} />
+    <Stack.Navigator initialRouteName="Splash">
+      <Stack.Screen name="Splash" component={SplashScreen} options={{ headerShown: false }} />
       <Stack.Screen name="LoginSelection" component={LoginSelectionScreen} options={{ title: 'Login' }} />
       <Stack.Screen name="DoctorLogin" component={DoctorLoginScreen} options={{ title: 'Doctor Login' }} />
       <Stack.Screen name="PatientLogin" component={PatientLoginScreen} options={{ title: 'Patient Login' }} />
@@ -73,6 +72,9 @@ function AuthStack() {
       <Stack.Screen name="OtpEnterPhone" component={OtpEnterPhoneScreen} options={{ title: 'Reset Password' }} />
       <Stack.Screen name="OtpVerify" component={OtpVerifyScreen} options={{ title: 'Verify OTP' }} />
       <Stack.Screen name="OtpResetPassword" component={OtpResetPasswordScreen} options={{ title: 'Set Password' }} />
+      <Stack.Screen name="PublicHome" component={PublicHomeScreen} options={{ title: 'Home' }} />
+      <Stack.Screen name="PublicBlog" component={PublicBlogScreen} options={{ title: 'Blog' }} />
+      <Stack.Screen name="PublicContact" component={PublicContactScreen} options={{ title: 'Contact' }} />
     </Stack.Navigator>
   );
 }

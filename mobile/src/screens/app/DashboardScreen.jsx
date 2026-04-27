@@ -60,7 +60,7 @@ export function DashboardScreen({ navigation }) {
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
-        <SummaryCard label="Role" value={session?.role || 'unknown'} />
+        {/* Role label removed from dashboard UI */}
         <SummaryCard label="Name" value={session?.name || 'N/A'} />
         <SummaryCard label="Identity" value={session?.email || session?.patientId || 'N/A'} />
 

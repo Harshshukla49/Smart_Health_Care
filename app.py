@@ -1,3 +1,82 @@
+import re
+def _doctor_owns_record(record, doctor_id):
+    # Doctor owns patient if patient['doctorId'] matches doctor_id (email)
+    return str(record.get('doctorId', '')).strip().lower() == str(doctor_id).strip().lower()
+
+def _validate_patient_payload(data):
+    errors = []
+    name = str(data.get('name', '')).strip()
+    age = data.get('age')
+    gender = str(data.get('gender', '')).strip().lower()
+    phone = str(data.get('phone', '')).strip()
+    email = str(data.get('email', '')).strip().lower()
+
+    if not name:
+        errors.append('Name is required.')
+    if not age or not str(age).isdigit() or int(age) < 0 or int(age) > 120:
+        errors.append('Valid age is required.')
+    if gender not in {'male', 'female', 'other'}:
+        errors.append('Gender must be male, female, or other.')
+    if not phone or not re.match(r'^\+?\d{10,15}$', phone):
+        errors.append('Valid phone number is required.')
+    if not email or '@' not in email:
+        errors.append('Valid email is required.')
+    return errors
+
+def _generate_patient_id():
+    return str(uuid.uuid4())
+
+@app.route('/api/doctor/<doctor_id>/patients', methods=['POST'])
+@require_auth(roles={'doctor'})
+def add_patient(doctor_id):
+    # Authenticated doctor only
+    payload = _read_auth_payload()
+    requester_doctor_id = str(payload.get('email', '')).strip().lower()
+    if requester_doctor_id != str(doctor_id).strip().lower():
+        return api_error('Forbidden. Doctor can only add patients to their own account.', 403)
+
+    data = request.get_json(silent=True) or {}
+    errors = _validate_patient_payload(data)
+    if errors:
+        return api_error(errors[0], 400, {'errors': errors})
+
+    # Check for duplicate patient (by email or phone)
+    patient_ref = _patient_collection_reference()
+    all_patients = patient_ref.get() or {}
+    for key, patient in (all_patients.items() if isinstance(all_patients, dict) else []):
+        if not isinstance(patient, dict):
+            continue
+        if str(patient.get('email', '')).strip().lower() == data['email'].strip().lower():
+            return api_error('A patient with this email already exists.', 409)
+        if _normalize_phone(patient.get('phone', '')) == _normalize_phone(data['phone']):
+            return api_error('A patient with this phone already exists.', 409)
+
+    patient_id = _generate_patient_id()
+    now = _utc_now_iso()
+    patient_record = {
+        'patientId': patient_id,
+        'name': data['name'].strip(),
+        'age': int(data['age']),
+        'gender': data['gender'].strip().lower(),
+        'phone': _normalize_phone(data['phone']),
+        'email': data['email'].strip().lower(),
+        'doctorId': requester_doctor_id,
+        'createdAt': now,
+        'updatedAt': now,
+        'medicines': [],
+    }
+    # Store patient
+    patient_ref.child(patient_id).set(patient_record)
+
+    # Link patient to doctor (add patientId to doctor's patient list)
+    doctor_ref = _doctor_collection_reference().child(requester_doctor_id.replace('.', ','))
+    doctor = doctor_ref.get() or {}
+    doctor_patients = doctor.get('patients', [])
+    if patient_id not in doctor_patients:
+        doctor_patients.append(patient_id)
+        doctor_ref.update({'patients': doctor_patients})
+
+    return api_success('Patient added successfully.', {'patient': patient_record})
 from flask import abort
 import os
 import random

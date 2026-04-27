@@ -23,18 +23,13 @@ export function LoginSelection() {
     },
   ];
 
+
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#050816] text-slate-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.34),transparent_32%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.3),transparent_32%),radial-gradient(circle_at_bottom,rgba(20,184,166,0.18),transparent_28%),linear-gradient(135deg,#020617_0%,#08101f_46%,#120b25_100%)]" />
       <div className="pointer-events-none absolute left-10 top-10 h-32 w-32 rounded-full bg-cyan-400/10 blur-3xl" />
       <div className="pointer-events-none absolute bottom-10 right-10 h-40 w-40 rounded-full bg-fuchsia-400/10 blur-3xl" />
-
-      <div className="relative z-20 px-4 pt-4 sm:px-6 lg:px-8">
-        <Link to="/" className="dashboard-back-link" aria-label={t('auth.backToHome')}>
-          <ArrowLeft className="h-4 w-4" />
-          <span className="dashboard-back-label">{t('auth.backToHome')}</span>
-        </Link>
-      </div>
+      {/* Removed Back to home button as this is the first page */}
 
       <motion.div
         className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8"

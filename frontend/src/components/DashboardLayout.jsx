@@ -20,8 +20,8 @@ export function DashboardLayout({ role, title, subtitle, children, backTo = '/',
     };
   }, [mobileOpen]);
 
-  const roleLabel = currentRole === 'doctor' ? t('roles.doctor') : t('roles.patient');
-  const userName = session?.name || t('roles.user', { role: roleLabel });
+  // Remove role label from UI
+  const userName = session?.name || t('roles.user');
   const resolvedBackLabel = backLabel || t('common.backToHome');
   const overviewPath = getDashboardPathForRole(currentRole);
 
@@ -51,7 +51,7 @@ export function DashboardLayout({ role, title, subtitle, children, backTo = '/',
             </span>
             <div>
               <p className="font-heading text-lg font-bold text-white">{t('common.smartHealth')}</p>
-              <p className="font-body text-xs uppercase tracking-[0.35em] text-slate-400">{t('layout.roleConsole', { role: roleLabel })}</p>
+              {/* Role label removed from sidebar */}
             </div>
           </Link>
 
@@ -128,22 +128,19 @@ export function DashboardLayout({ role, title, subtitle, children, backTo = '/',
 
                   <div className="hidden sm:block lg:hidden">
                     <p className="font-display text-base font-bold text-white sm:text-lg">{t('common.smartHealth')}</p>
-                    <p className="text-xs uppercase tracking-[0.3em] text-slate-400">{t('layout.roleConsole', { role: roleLabel })}</p>
+                    {/* Role label removed from header */}
                   </div>
                 </div>
 
                 <div className="min-w-0">
-                  <p className="text-xs uppercase tracking-[0.35em] text-cyan-300 sm:text-xs">{t('layout.roleDashboard', { role: roleLabel })}</p>
+                  {/* Role dashboard label removed */}
                   <h1 className="mt-1 font-heading text-xl font-bold text-white sm:mt-2 sm:text-2xl md:text-4xl">{title}</h1>
                   <p className="mt-1 max-w-3xl text-xs leading-6 text-slate-300 sm:mt-2 sm:text-sm sm:leading-7">{subtitle}</p>
                 </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 sm:gap-3 lg:justify-end">
-                <div className="hidden rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-semibold text-slate-200 sm:flex sm:items-center sm:gap-2 md:px-4 md:py-2 md:text-sm">
-                  <ShieldCheck className="h-4 w-4 text-cyan-200" />
-                  <span className="hidden md:inline">{t('layout.secureSession', { role: roleLabel })}</span>
-                </div>
+                {/* Secure session label with role removed */}
                 <LanguageSwitcher compact />
                 <button
                   type="button"

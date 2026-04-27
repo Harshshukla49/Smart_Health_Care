@@ -18,6 +18,7 @@ import { SignupSelection } from './pages/SignupSelection';
 import { PatientSignup } from './pages/PatientSignup';
 import { DoctorSignup } from './pages/DoctorSignup';
 import { getAuthSession } from './utils/auth';
+import SplashScreen from './pages/SplashScreen';
 
 function AuthRoute({ children }) {
   const session = getAuthSession();
@@ -52,6 +53,7 @@ export default function App() {
         transition={{ duration: 0.28, ease: 'easeInOut' }}
       >
         <Routes location={location}>
+          <Route path="/" element={<SplashScreen />} />
           <Route path="/login" element={<AuthRoute><LoginSelection /></AuthRoute>} />
           <Route path="/login/patient" element={<AuthRoute><PatientLogin /></AuthRoute>} />
           <Route path="/login/doctor" element={<AuthRoute><DoctorLogin /></AuthRoute>} />
@@ -62,7 +64,7 @@ export default function App() {
           <Route path="/chat" element={<AuthenticatedRoute><Chat /></AuthenticatedRoute>} />
           <Route path="/dashboard/patient" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard/doctor" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/" element={<MainLayout><Home /></MainLayout>} />
+          <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="/about" element={<MainLayout><About /></MainLayout>} />
           <Route path="/blog" element={<MainLayout><Blog /></MainLayout>} />
           <Route path="/contact" element={<MainLayout><Contact /></MainLayout>} />
