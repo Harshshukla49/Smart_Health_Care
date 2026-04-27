@@ -13,6 +13,7 @@ import { Chat } from './pages/Chat';
 import { NotFound } from './pages/NotFound';
 import { LoginSelection } from './pages/LoginSelection';
 import { PatientLogin } from './pages/PatientLogin';
+import PatientWelcome from './pages/PatientWelcome';
 import { DoctorLogin } from './pages/DoctorLogin';
 import { SignupSelection } from './pages/SignupSelection';
 import { PatientSignup } from './pages/PatientSignup';
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="/signup/doctor" element={<AuthRoute><DoctorSignup /></AuthRoute>} />
           <Route path="/dashboard" element={<AuthenticatedRoute><Dashboard /></AuthenticatedRoute>} />
           <Route path="/chat" element={<AuthenticatedRoute><Chat /></AuthenticatedRoute>} />
+          <Route path="/welcome" element={<PatientWelcome />} />
           <Route path="/dashboard/patient" element={<Navigate to="/dashboard" replace />} />
           <Route path="/dashboard/doctor" element={<Navigate to="/dashboard" replace />} />
           <Route path="/" element={<Navigate to="/login" replace />} />

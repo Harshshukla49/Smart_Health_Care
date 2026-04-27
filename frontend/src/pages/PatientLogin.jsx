@@ -37,7 +37,7 @@ export function PatientLogin() {
       });
 
       toast.success(t('auth.patientLogin.loginSuccess'));
-      navigate('/dashboard/patient', { replace: true });
+      navigate('/welcome', { replace: true });
     } catch (requestError) {
       const message = requestError?.response?.data?.message || requestError?.message || t('auth.patientLogin.invalidCredentials');
       setError(message);

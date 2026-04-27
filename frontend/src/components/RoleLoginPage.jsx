@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from 'react';
+import toast from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, HeartPulse, LoaderCircle, Lock, Mail, Phone, ShieldCheck, User } from 'lucide-react';
@@ -97,6 +98,9 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
           token: auth?.token || '',
           tokenExpiresIn: auth?.expiresIn || 0,
         });
+        if (!isSignup) {
+          toast.success('Welcome, Doctor!');
+        }
       } else {
         setAuthSession({
           role,
