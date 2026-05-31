@@ -7,6 +7,7 @@ import { Button } from '../components/Button';
 import { Loader } from '../components/Loader';
 import { ECGChart } from '../components/ECGChart';
 import { VitalCard } from '../components/VitalCard';
+import { AlertsPanel } from '../components/AlertsPanel';
 import { LiveVitalsProvider, useLiveVitals } from '../context/LiveVitalsContext';
 import { useI18n } from '../context/I18nContext';
 import { getApiPatientById, getPatients, updateDoctorProfile, updatePatientProfile } from '../services/api';
@@ -32,6 +33,12 @@ function DashboardBody() {
     temperature,
     updatedAt,
     ecgData,
+    // Add prediction fields if available from context
+    risk,
+    risk_score,
+    confidence,
+    alerts,
+    message,
   } = useLiveVitals();
 
   const session = getAuthSession();
@@ -48,10 +55,13 @@ function DashboardBody() {
   const patientCount = doctorPatients.length;
   const preferredChatPatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
   const hasCriticalVitals = Number(spo2) > 0 && Number(spo2) < 90;
-  const healthStatusLabel = hasCriticalVitals ? t('dashboard.cards.criticalAttention') : t('dashboard.cards.stableMonitoring');
-  const healthStatusClass = hasCriticalVitals
+  // Use backend risk and alerts if available
+  const healthStatusLabel = risk ? `${risk}` : (hasCriticalVitals ? t('dashboard.cards.criticalAttention') : t('dashboard.cards.stableMonitoring'));
+  const healthStatusClass = risk === 'Critical'
     ? 'border-rose-300/30 bg-rose-500/15 text-rose-100'
-    : 'border-emerald-300/30 bg-emerald-500/12 text-emerald-100';
+    : risk === 'High Risk'
+      ? 'border-amber-300/30 bg-amber-500/15 text-amber-100'
+      : 'border-emerald-300/30 bg-emerald-500/12 text-emerald-100';
 
   useEffect(() => {
     let active = true;
@@ -204,34 +214,75 @@ function DashboardBody() {
     >
       {loading ? <Loader label={t('dashboard.loadingVitals')} /> : null}
 
+      {/* Show live alerts panel if alerts exist */}
+      {alerts && alerts.length > 0 && (
+        <AlertsPanel
+          alerts={alerts.map((alert, idx) => ({
+            code: `alert-${idx}`,
+            type: alert.toLowerCase().includes('critical') || alert.toLowerCase().includes('emergency') ? 'critical' : alert.toLowerCase().includes('warning') ? 'warning' : 'normal',
+            title: alert,
+            description: message || '',
+          }))}
+        />
+      )}
+
       {!loading ? (
         <div className="space-y-4 sm:space-y-5 lg:space-y-6">
           <section className="grid gap-2 sm:grid-cols-2 sm:gap-3 md:gap-3 lg:gap-4 xl:grid-cols-4">
-            {[
-              { label: t('dashboard.cards.monitoringState'), value: healthStatusLabel, icon: Activity },
-              { label: t('dashboard.cards.signalFreshness'), value: updatedAt ? t('dashboard.cards.liveStream') : t('dashboard.cards.pendingSync'), icon: Waves },
-              { label: t('dashboard.cards.protectionMode'), value: t('dashboard.cards.roleBasedSecure'), icon: ShieldCheck },
-              {
-                label: t('dashboard.cards.doctorScope'),
-                value: role === 'doctor' ? t('dashboard.cards.doctorPatients', { count: patientCount }) : t('dashboard.cards.personalView'),
-                icon: Siren,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <Card key={item.label} className="min-w-0 p-3 sm:p-4">
-                  <div className="flex items-start justify-between gap-2 sm:gap-3">
-                    <div className="min-w-0">
-                      <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400 sm:text-[10px]">{item.label}</p>
-                      <p className="mt-1 text-xs font-semibold text-slate-100 sm:mt-2 sm:text-sm">{item.value}</p>
-                    </div>
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-cyan-200 sm:h-9 sm:w-9 sm:rounded-xl">
-                      <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                    </span>
-                  </div>
-                </Card>
-              );
-            })}
+            {/* Monitoring State */}
+            <Card className="min-w-0 p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400 sm:text-[10px]">{t('dashboard.cards.monitoringState')}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-100 sm:mt-2 sm:text-sm">{healthStatusLabel}</p>
+                  {risk_score !== undefined && (
+                    <span className="block mt-1 text-xs text-cyan-200">Risk Score: {risk_score}</span>
+                  )}
+                  {confidence !== undefined && (
+                    <span className="block mt-1 text-xs text-cyan-200">Confidence: {confidence}%</span>
+                  )}
+                </div>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-cyan-200 sm:h-9 sm:w-9 sm:rounded-xl">
+                  <Activity className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </span>
+              </div>
+            </Card>
+            {/* Signal Freshness */}
+            <Card className="min-w-0 p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400 sm:text-[10px]">{t('dashboard.cards.signalFreshness')}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-100 sm:mt-2 sm:text-sm">{updatedAt ? t('dashboard.cards.liveStream') : t('dashboard.cards.pendingSync')}</p>
+                </div>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-cyan-200 sm:h-9 sm:w-9 sm:rounded-xl">
+                  <Waves className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </span>
+              </div>
+            </Card>
+            {/* Protection Mode */}
+            <Card className="min-w-0 p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400 sm:text-[10px]">{t('dashboard.cards.protectionMode')}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-100 sm:mt-2 sm:text-sm">{t('dashboard.cards.roleBasedSecure')}</p>
+                </div>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-cyan-200 sm:h-9 sm:w-9 sm:rounded-xl">
+                  <ShieldCheck className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </span>
+              </div>
+            </Card>
+            {/* Doctor Scope */}
+            <Card className="min-w-0 p-3 sm:p-4">
+              <div className="flex items-start justify-between gap-2 sm:gap-3">
+                <div className="min-w-0">
+                  <p className="text-[9px] uppercase tracking-[0.24em] text-slate-400 sm:text-[10px]">{t('dashboard.cards.doctorScope')}</p>
+                  <p className="mt-1 text-xs font-semibold text-slate-100 sm:mt-2 sm:text-sm">{role === 'doctor' ? t('dashboard.cards.doctorPatients', { count: patientCount }) : t('dashboard.cards.personalView')}</p>
+                </div>
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-white/10 bg-white/5 text-cyan-200 sm:h-9 sm:w-9 sm:rounded-xl">
+                  <Siren className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                </span>
+              </div>
+            </Card>
           </section>
 
           <Card className="p-4 sm:p-6">

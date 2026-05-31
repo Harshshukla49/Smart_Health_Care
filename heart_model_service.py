@@ -21,25 +21,37 @@ FIELD_ALIASES = {
     "age": "Age",
     "restingbp": "RestingBP",
     "resting_blood_pressure": "RestingBP",
+    "bloodpressure": "RestingBP",
+    "bp": "RestingBP",
     "cholesterol": "Cholesterol",
     "fastingbs": "FastingBS",
     "fasting_bs": "FastingBS",
+    "fastingbloodsugar": "FastingBS",
     "maxhr": "MaxHR",
     "max_hr": "MaxHR",
+    "heartrate": "MaxHR",
+    "heart_rate": "MaxHR",
+    "pulse": "MaxHR",
     "oldpeak": "Oldpeak",
     "sex": "Sex",
+    "gender": "Sex",
     "chestpaintype": "ChestPainType",
     "chest_pain_type": "ChestPainType",
+    "pain_type": "ChestPainType",
     "restingecg": "RestingECG",
     "resting_ecg": "RestingECG",
+    "ecg": "RestingECG",
     "exerciseangina": "ExerciseAngina",
     "exercise_angina": "ExerciseAngina",
+    "angina": "ExerciseAngina",
     "st_slope": "ST_Slope",
     "stslope": "ST_Slope",
-    "heartrate": "heart_rate",
-    "heart_rate": "heart_rate",
+    "slope": "ST_Slope",
     "spo2": "spo2",
+    "oxygen": "spo2",
+    "o2": "spo2",
     "temperature": "temperature",
+    "temp": "temperature",
 }
 
 
@@ -84,22 +96,33 @@ def normalize_payload(data: Any) -> dict[str, Any]:
         if canonical in REQUIRED_FIELDS:
             normalized[canonical] = value
 
+
     missing_fields = [field for field in REQUIRED_FIELDS if field not in normalized]
     if missing_fields:
+        import logging
+        logging.error(f"Prediction error: Missing required fields: {', '.join(missing_fields)}. Payload: {data}")
         raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
 
     for field in NUMERIC_FIELDS:
         try:
             normalized[field] = float(normalized[field])
         except (TypeError, ValueError) as exc:
+            import logging
+            logging.error(f"Prediction error: Field '{field}' must be numeric. Payload: {data}")
             raise ValueError(f"Field '{field}' must be numeric.") from exc
+
 
     for field in CATEGORICAL_FIELDS:
         value = normalized[field]
         if value is None:
+            import logging
+            logging.error(f"Prediction error: Field '{field}' cannot be empty. Payload: {data}")
             raise ValueError(f"Field '{field}' cannot be empty.")
         normalized[field] = str(value).strip()
         if not normalized[field]:
+            import logging
+            logging.error(f"Prediction error: Field '{field}' cannot be empty. Payload: {data}")
             raise ValueError(f"Field '{field}' cannot be empty.")
 
     return normalized
@@ -143,22 +166,60 @@ def predict_heart_disease(data: Any) -> dict[str, Any]:
 
     raw_prediction = model.predict(frame)[0]
     status = _status_from_prediction(raw_prediction)
-    confidence = round(_confidence_for_prediction(model, frame, raw_prediction), 4)
-    risk = _risk_from_status(status)
-    message = (
-        "The trained ECG model detected a high-risk heart-disease pattern."
-        if status == "Critical"
-        else "The trained ECG model indicates no high-risk heart-disease pattern."
-    )
+    confidence = round(_confidence_for_prediction(model, frame, raw_prediction) * 100, 2)
+    risk_score = int(confidence)
+    risk_class = _risk_classification(risk_score)
+    alerts = _generate_medical_alerts(features)
+    message = _alert_message(alerts, status)
 
     return {
         "prediction": status.lower(),
         "status": status,
-        "risk": risk,
+        "risk": risk_class,
+        "risk_score": risk_score,
         "message": message,
         "confidence": confidence,
+        "alerts": alerts,
         "features": features,
     }
+def _risk_classification(score: int) -> str:
+    if score <= 25:
+        return "Normal"
+    elif score <= 50:
+        return "Warning"
+    elif score <= 75:
+        return "High Risk"
+    else:
+        return "Critical"
+
+def _generate_medical_alerts(features: dict) -> list:
+    alerts = []
+    try:
+        spo2 = float(features.get("spo2", 0))
+        hr = float(features.get("MaxHR", 0))
+        temp = float(features.get("temperature", 0))
+        if spo2 < 80:
+            alerts.append("SpO2 critically low (emergency)")
+        elif spo2 < 90:
+            alerts.append("SpO2 low (critical)")
+        if hr > 140:
+            alerts.append("Heart rate critical")
+        elif hr > 120:
+            alerts.append("Heart rate high risk")
+        if temp > 38:
+            alerts.append("Fever alert")
+    except Exception:
+        pass
+    return alerts
+
+def _alert_message(alerts: list, status: str) -> str:
+    if alerts:
+        return "; ".join(alerts)
+    if status == "Critical":
+        return "Immediate medical attention required"
+    elif status == "Normal":
+        return "Vitals within normal range"
+    return "No critical alerts"
 
 
 def predict_status(data: Any) -> str:

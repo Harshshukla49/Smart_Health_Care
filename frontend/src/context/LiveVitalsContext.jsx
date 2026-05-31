@@ -22,6 +22,12 @@ const toVitals = (payload = {}) => ({
   spo2: toNumber(payload.spo2 ?? payload.SpO2),
   temperature: toNumber(payload.temperature ?? payload.temp),
   updatedAt: toTimestamp(payload.updatedAt || payload.timestamp),
+  // ML prediction fields
+  risk: payload.risk || '',
+  risk_score: payload.risk_score ?? undefined,
+  confidence: payload.confidence ?? undefined,
+  alerts: Array.isArray(payload.alerts) ? payload.alerts : [],
+  message: payload.message || '',
 });
 
 const sanitizeEcgArray = (input) => {
@@ -82,6 +88,11 @@ export function LiveVitalsProvider({ children }) {
     spo2: 0,
     temperature: 0,
     updatedAt: '',
+    risk: '',
+    risk_score: undefined,
+    confidence: undefined,
+    alerts: [],
+    message: '',
   });
   const [ecgData, setEcgData] = useState([]);
 
@@ -274,8 +285,14 @@ export function LiveVitalsProvider({ children }) {
       temperature: vitals.temperature,
       updatedAt: vitals.updatedAt,
       ecgData,
+      // ML prediction fields
+      risk: vitals.risk,
+      risk_score: vitals.risk_score,
+      confidence: vitals.confidence,
+      alerts: vitals.alerts,
+      message: vitals.message,
     }),
-    [ecgData, error, loading, patientId, patientName, vitals.heartRate, vitals.spo2, vitals.temperature, vitals.updatedAt]
+    [ecgData, error, loading, patientId, patientName, vitals.heartRate, vitals.spo2, vitals.temperature, vitals.updatedAt, vitals.risk, vitals.risk_score, vitals.confidence, vitals.alerts, vitals.message]
   );
 
   return <LiveVitalsContext.Provider value={value}>{children}</LiveVitalsContext.Provider>;

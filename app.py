@@ -1,4 +1,12 @@
 import re
+
+from flask import abort
+
+# ========== Flask app initialization ========== #
+# (All imports and app = Flask(__name__) ...)
+# ...existing code...
+
+# ========== Route and validation functions (must be after app = Flask(__name__)) ========== #
 def _doctor_owns_record(record, doctor_id):
     # Doctor owns patient if patient['doctorId'] matches doctor_id (email)
     return str(record.get('doctorId', '')).strip().lower() == str(doctor_id).strip().lower()
@@ -77,7 +85,6 @@ def add_patient(doctor_id):
         doctor_ref.update({'patients': doctor_patients})
 
     return api_success('Patient added successfully.', {'patient': patient_record})
-from flask import abort
 import os
 import random
 import smtplib

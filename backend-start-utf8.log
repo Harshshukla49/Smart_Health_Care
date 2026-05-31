@@ -1,0 +1,15 @@
+﻿venv\Scripts\python.exe : Traceback (most recent call last):
+At line:1 char:1
++ venv\Scripts\python.exe app.py *> backend-start.log; exit 
+$LASTEXITCO ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most rec 
+   ent call last)::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "C:\Users\india\Desktop\smart-health-backend\app.py", 
+line 37, in <module>
+    @app.route('/api/doctor/<doctor_id>/patients', 
+methods=['POST'])
+     ^^^
+NameError: name 'app' is not defined
