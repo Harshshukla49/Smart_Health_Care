@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Activity, ArrowRight, HeartPulse, MessageCircle, Phone, ShieldCheck, Siren, Thermometer, Waves } from 'lucide-react';
+import { Activity, ArrowRight, HeartPulse, Link2, MessageCircle, Phone, ShieldCheck, Siren, Thermometer, Waves } from 'lucide-react';
 import { DashboardLayout } from '../components/DashboardLayout';
 import { Card } from '../components/Card';
 import { Button } from '../components/Button';
@@ -54,14 +54,15 @@ function DashboardBody() {
 
   const patientCount = doctorPatients.length;
   const preferredChatPatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
-  const hasCriticalVitals = Number(spo2) > 0 && Number(spo2) < 90;
-  // Use backend risk and alerts if available
-  const healthStatusLabel = risk ? `${risk}` : (hasCriticalVitals ? t('dashboard.cards.criticalAttention') : t('dashboard.cards.stableMonitoring'));
+  const preferredDevicePatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
+  const healthStatusLabel = risk ? String(risk) : 'No API prediction yet';
   const healthStatusClass = risk === 'Critical'
     ? 'border-rose-300/30 bg-rose-500/15 text-rose-100'
     : risk === 'High Risk'
       ? 'border-amber-300/30 bg-amber-500/15 text-amber-100'
-      : 'border-emerald-300/30 bg-emerald-500/12 text-emerald-100';
+      : risk === 'Normal'
+        ? 'border-emerald-300/30 bg-emerald-500/12 text-emerald-100'
+        : 'border-slate-300/20 bg-white/5 text-slate-200';
 
   useEffect(() => {
     let active = true;
@@ -302,6 +303,18 @@ function DashboardBody() {
                     {t('dashboard.actions.addPatient')}
                   </Button>
                 ) : null}
+                {role === 'doctor' ? (
+                  <Button
+                    as={Link}
+                    to={preferredDevicePatientId ? `/patients/${encodeURIComponent(preferredDevicePatientId)}` : '/add-patient'}
+                    variant="secondary"
+                    size="sm"
+                    className="text-xs sm:text-sm"
+                  >
+                    <Link2 className="h-3.5 w-3.5" />
+                    Connect Hardware Device
+                  </Button>
+                ) : null}
                 <Button
                   as={Link}
                   to={role === 'doctor' && preferredChatPatientId ? `/chat?patientId=${encodeURIComponent(preferredChatPatientId)}` : '/chat'}
@@ -323,6 +336,19 @@ function DashboardBody() {
                 <p className="mt-1 font-semibold text-white sm:mt-2">{role === 'doctor' ? t('dashboard.quickActions.doctorAction') : t('dashboard.quickActions.patientAction')}</p>
                 <p className="mt-0.5 inline-flex items-center gap-0.5 text-cyan-200 sm:mt-1 sm:gap-1 text-[9px] sm:text-xs">{t('common.open')} <ArrowRight className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" /></p>
               </Link>
+              {role === 'doctor' ? (
+                <Link
+                  to={preferredDevicePatientId ? `/patients/${encodeURIComponent(preferredDevicePatientId)}` : '/add-patient'}
+                  className="rounded-xl border border-cyan-300/20 bg-cyan-500/10 px-3 py-3 text-xs text-slate-200 transition hover:border-cyan-300/45 hover:bg-cyan-500/15 sm:rounded-2xl sm:px-4 sm:py-4 sm:text-sm"
+                >
+                  <p className="text-[9px] uppercase tracking-[0.24em] text-cyan-200/80 sm:text-xs">Hardware device</p>
+                  <p className="mt-1 inline-flex items-center gap-1 font-semibold text-white sm:mt-2 text-xs sm:text-sm">
+                    <Link2 className="h-3 w-3 sm:h-4 sm:w-4" />
+                    Open device controls
+                  </p>
+                  <p className="mt-0.5 inline-flex items-center gap-0.5 text-cyan-200 sm:mt-1 sm:gap-1 text-[9px] sm:text-xs">Show connect option <ArrowRight className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" /></p>
+                </Link>
+              ) : null}
               <Link
                 to="/about"
                 className="rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-xs text-slate-200 transition hover:border-cyan-300/35 hover:bg-white/10 sm:rounded-2xl sm:px-4 sm:py-4 sm:text-sm"

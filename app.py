@@ -1,6 +1,48 @@
 import re
 
-from flask import abort
+from flask import Flask, abort
+from functools import wraps
+
+app = Flask(__name__)
+
+
+def require_auth(roles=None, patient_id_arg=None):
+    allowed_roles = {str(role).strip().lower() for role in (roles or []) if str(role).strip()}
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            payload, auth_error = _require_auth_payload()
+            if auth_error:
+                return auth_error
+
+            role = str(payload.get('role') or '').strip().lower()
+            if allowed_roles and role not in allowed_roles:
+                return api_error('Forbidden. You are not authorized to perform this action.', 403)
+
+            if patient_id_arg:
+                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
+                if role == 'patient':
+                    requester_patient_id = str(payload.get('patientId') or '').strip()
+                    if not requester_patient_id or requester_patient_id != target_patient_id:
+                        return api_error('Access denied for this patient record.', 403)
+
+                if role == 'doctor':
+                    doctor_id = str(payload.get('email') or '').strip().lower()
+                    if not doctor_id:
+                        return api_error('Forbidden. Doctor context is missing from token.', 403)
+
+                    record = _patient_collection_reference().child(target_patient_id).get()
+                    if not isinstance(record, dict):
+                        return api_error('Patient not found.', 404)
+                    if not _doctor_owns_record(record, doctor_id):
+                        return api_error('Access denied for this patient record.', 403)
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 # ========== Flask app initialization ========== #
 # (All imports and app = Flask(__name__) ...)
@@ -95,12 +137,14 @@ from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
 import uuid
+from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit, join_room
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -112,7 +156,6 @@ import joblib
 import numpy as np
 import pandas as pd
 from sensor_adapter import create_sensor_adapter
-from heart_model_service import predict_heart_disease
 
 BASE_DIR = Path(__file__).resolve().parent
 VITAL_FEATURE_COLUMNS = ["heart_rate", "spo2", "temperature"]
@@ -190,7 +233,49 @@ for candidate_path in SPO2_MODEL_PATHS:
 load_dotenv()
 
 # Initialize Flask app once
-app = Flask(__name__)
+try:
+    app
+except NameError:
+    app = Flask(__name__)
+
+
+def require_auth(roles=None, patient_id_arg=None):
+    allowed_roles = {str(role).strip().lower() for role in (roles or []) if str(role).strip()}
+
+    def decorator(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            payload, auth_error = _require_auth_payload()
+            if auth_error:
+                return auth_error
+
+            role = str(payload.get('role') or '').strip().lower()
+            if allowed_roles and role not in allowed_roles:
+                return api_error('Forbidden. You are not authorized to perform this action.', 403)
+
+            if patient_id_arg:
+                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
+                if role == 'patient':
+                    requester_patient_id = str(payload.get('patientId') or '').strip()
+                    if not requester_patient_id or requester_patient_id != target_patient_id:
+                        return api_error('Access denied for this patient record.', 403)
+
+                if role == 'doctor':
+                    doctor_id = str(payload.get('email') or '').strip().lower()
+                    if not doctor_id:
+                        return api_error('Forbidden. Doctor context is missing from token.', 403)
+
+                    record = _patient_collection_reference().child(target_patient_id).get()
+                    if not isinstance(record, dict):
+                        return api_error('Patient not found.', 404)
+                    if not _doctor_owns_record(record, doctor_id):
+                        return api_error('Access denied for this patient record.', 403)
+
+            return fn(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 CORS(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
@@ -599,6 +684,7 @@ def _build_predict_response(vitals, model_result=None):
             "status": prediction,
             "message": message,
             "confidence": round(confidence, 4),
+            "features": vitals,
             "vitals": vitals,
         }
 
@@ -608,6 +694,7 @@ def _build_predict_response(vitals, model_result=None):
         "status": "unavailable",
         "message": "Prediction unavailable",
         "confidence": 0.0,
+        "features": vitals,
         "vitals": vitals,
     }
 
@@ -623,6 +710,29 @@ def predict_risk(vitals):
         return _build_predict_response(parsed_vitals, result)
     except Exception:
         return _build_predict_response(parsed_vitals, None)
+
+
+def _vitals_model_classes():
+    classes = [str(label).strip() for label in (vitals_model_classes or []) if str(label).strip()]
+    if classes:
+        return classes
+
+    if vitals_model is not None and hasattr(vitals_model, "classes_"):
+        return [str(label).strip() for label in getattr(vitals_model, "classes_", []) if str(label).strip()]
+
+    return []
+
+
+def _vitals_model_debug_payload():
+    loaded = vitals_model is not None
+    return {
+        "status": "success" if loaded else "warning",
+        "loaded": loaded,
+        "feature_count": len(VITAL_FEATURE_COLUMNS),
+        "feature_columns": list(VITAL_FEATURE_COLUMNS),
+        "model_path": str(VITAL_MODEL_PATH.resolve()),
+        "classes": _vitals_model_classes(),
+    }
 
 
 def _pick_dataset_vitals_row():
@@ -1875,11 +1985,12 @@ def _build_patient_payload_response(patient_id, normalized):
 
 def _append_prediction_audit(record, prediction, source, vitals):
     existing = list(record.get('predictionAudit') or [])
+    clinical_status = prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk') or 'unavailable'
     existing.append({
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'source': source,
         'risk': prediction.get('risk', 'Prediction unavailable'),
-        'status': prediction.get('status', 'unavailable'),
+        'status': clinical_status,
         'confidence': _coerce_float(prediction.get('confidence'), 0.0),
         'message': prediction.get('message', 'Prediction unavailable'),
         'vitals': {
@@ -1916,7 +2027,7 @@ def _stream_patient_updates(patient_id):
             'prediction': {
                 'risk': prediction.get('risk'),
                 'message': prediction.get('message'),
-                'status': prediction.get('status'),
+                'status': prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk'),
                 'confidence': prediction.get('confidence'),
             },
             'deviceConnected': True,
@@ -2510,7 +2621,7 @@ def get_patients():
 
 
 @app.route('/add-patient', methods=['POST'])
-def add_patient():
+def add_patient_legacy():
     try:
         data = request.get_json(silent=True)
         if not data:
@@ -2582,7 +2693,7 @@ def add_patient():
         payload['prediction'] = {
             'risk': prediction.get('risk'),
             'message': prediction.get('message'),
-            'status': prediction.get('status'),
+            'status': prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk'),
             'confidence': prediction.get('confidence', 0.0),
         }
         prediction_source = 'manual-initialization' if any(value not in (None, '') for value in [manual_heart_rate, manual_spo2, manual_temperature, manual_ecg_data]) else 'dataset-initialization'
@@ -2590,7 +2701,7 @@ def add_patient():
             'timestamp': datetime.now(timezone.utc).isoformat(),
             'source': prediction_source,
             'risk': prediction.get('risk', 'Prediction unavailable'),
-            'status': prediction.get('status', 'unavailable'),
+            'status': prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk') or 'unavailable',
             'confidence': _coerce_float(prediction.get('confidence'), 0.0),
             'message': prediction.get('message', 'Prediction unavailable'),
             'vitals': {
@@ -2766,7 +2877,7 @@ def manual_update_patient(patient_id):
             'prediction': {
                 'risk': prediction.get('risk'),
                 'message': prediction.get('message'),
-                'status': prediction.get('status'),
+                'status': prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk'),
                 'confidence': prediction.get('confidence', 0.0),
             },
             'dataSource': 'manual-update',
@@ -2946,13 +3057,45 @@ def get_patient_vitals(patient_id):
 # Test API
 @app.route('/health', methods=['GET'])
 def health():
-    model_state = "ready" if vitals_model is not None else "missing"
-    return jsonify({
-        "status": "ok" if vitals_model is not None else "warning",
+    payload = {
+        "status": "success" if vitals_model is not None else "warning",
         "service": "flask-health-backend",
-        "model": model_state,
-        "classes": vitals_model_classes,
-    }), 200 if vitals_model is not None else 503
+        "model": "ready" if vitals_model is not None else "missing",
+        "modelPath": str(VITAL_MODEL_PATH.resolve()),
+        "featureCount": len(VITAL_FEATURE_COLUMNS),
+        "featureColumns": list(VITAL_FEATURE_COLUMNS),
+        "classes": _vitals_model_classes(),
+    }
+
+    if vitals_model is None:
+        payload["error"] = "Vitals model is not loaded. Train it first with: venv\\Scripts\\python.exe model.py"
+        return jsonify(payload), 503
+
+    return jsonify(payload), 200
+
+
+@app.route('/api/debug/model', methods=['GET'])
+def debug_model():
+    payload = _vitals_model_debug_payload()
+    return jsonify(payload), 200 if payload["loaded"] else 503
+
+
+@app.route('/api/debug/test-predict', methods=['POST'])
+def debug_test_predict():
+    try:
+        data = request.get_json(silent=True) or {}
+        prediction = predict_risk(data)
+        prediction['source'] = 'vitals_model.pkl'
+        prediction['modelPath'] = str(VITAL_MODEL_PATH.resolve())
+        return jsonify(prediction), 200
+    except ValueError as error:
+        import traceback
+
+        return jsonify({"status": "error", "error": "Invalid input", "message": str(error), "traceback": traceback.format_exc()}), 400
+    except Exception as error:
+        import traceback
+
+        return jsonify({"status": "error", "error": "Prediction failed", "message": str(error), "traceback": traceback.format_exc()}), 500
 
 @app.route('/test', methods=['GET'])
 def test():
@@ -2974,36 +3117,35 @@ def predict():
         if data is None:
             return jsonify({"error": "No JSON data provided"}), 400
 
-        if _is_ecg_payload(data):
-            prediction = predict_heart_disease(data)
-            prediction['source'] = 'trained-ecg-model'
-            return jsonify(prediction)
-
-        vitals = _parse_vitals_payload(data)
-        prediction = predict_risk(vitals)
-        prediction['source'] = 'trained-vitals-model'
+        prediction = predict_risk(data)
+        prediction['source'] = 'vitals_model.pkl'
+        prediction['modelPath'] = str(VITAL_MODEL_PATH.resolve())
 
         patient_id = str(data.get('patientId') or data.get('patient_id') or '').strip()
         if patient_id:
             record = _patient_collection_reference().child(patient_id).get()
             if isinstance(record, dict):
                 normalized = _normalize_patient_record(patient_id, record, record)
-                with_audit = _append_prediction_audit(dict(normalized), prediction, 'predict-api', vitals)
+                with_audit = _append_prediction_audit(dict(normalized), prediction, 'predict-api', prediction.get('features') or {})
                 _write_patient_record(patient_id, {
                     **with_audit,
                     'prediction': {
                         'risk': prediction.get('risk'),
                         'message': prediction.get('message'),
-                        'status': prediction.get('status'),
+                        'status': prediction.get('prediction_status') or prediction.get('risk'),
                         'confidence': prediction.get('confidence', 0.0),
                     },
                 })
 
         return jsonify(prediction)
     except ValueError as e:
-        return jsonify({"error": "Invalid input", "message": str(e)}), 400
+        import traceback
+
+        return jsonify({"status": "error", "error": "Invalid input", "message": str(e), "traceback": traceback.format_exc()}), 400
     except Exception as e:
-        return jsonify({"error": "Prediction failed", "message": str(e)}), 500
+        import traceback
+
+        return jsonify({"status": "error", "error": "Prediction failed", "message": str(e), "traceback": traceback.format_exc()}), 500
 
 
 @app.route('/patient/<patient_id>/monitor', methods=['GET'])
@@ -3040,9 +3182,13 @@ def monitor_patient(patient_id):
             "pollIntervalSeconds": 3,
         })
     except ValueError as e:
-        return jsonify({"status": "error", "message": str(e)}), 400
+        import traceback
+
+        return jsonify({"status": "error", "message": str(e), "traceback": traceback.format_exc()}), 400
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)}), 500
+        import traceback
+
+        return jsonify({"status": "error", "message": str(e), "traceback": traceback.format_exc()}), 500
 
 
 def _build_spo2_input_vector(heart_rate, bp, temp):

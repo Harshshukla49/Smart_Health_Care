@@ -4,6 +4,8 @@ from functools import lru_cache
 from numbers import Number
 from pathlib import Path
 from typing import Any
+import logging
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -11,11 +13,25 @@ from joblib import load
 
 
 ROOT_DIR = Path(__file__).resolve().parent
-MODEL_PATHS = [ROOT_DIR / "heart_model.pkl", ROOT_DIR / "model.pkl"]
+MODEL_PATH = ROOT_DIR / "model.pkl"
 
+REQUIRED_FIELDS = [
+    "Age",
+    "Sex",
+    "ChestPainType",
+    "RestingBP",
+    "Cholesterol",
+    "FastingBS",
+    "RestingECG",
+    "MaxHR",
+    "ExerciseAngina",
+    "Oldpeak",
+    "ST_Slope",
+]
 NUMERIC_FIELDS = ["Age", "RestingBP", "Cholesterol", "FastingBS", "MaxHR", "Oldpeak"]
 CATEGORICAL_FIELDS = ["Sex", "ChestPainType", "RestingECG", "ExerciseAngina", "ST_Slope"]
-REQUIRED_FIELDS = NUMERIC_FIELDS + CATEGORICAL_FIELDS
+
+LOGGER = logging.getLogger(__name__)
 
 FIELD_ALIASES = {
     "age": "Age",
@@ -57,20 +73,55 @@ FIELD_ALIASES = {
 
 @lru_cache(maxsize=1)
 def load_model():
-    for model_path in MODEL_PATHS:
-        if not model_path.exists():
-            continue
+    if not MODEL_PATH.exists():
+        raise FileNotFoundError(f"Trained heart model not found at {MODEL_PATH}")
 
-        try:
-            return load(model_path)
-        except Exception as e:
-            import logging
+    model = load(MODEL_PATH)
+    LOGGER.info("Loaded trained model from %s", MODEL_PATH)
 
-            logging.error(f"Failed to load model from {model_path}: {str(e)}")
+    if not hasattr(model, "predict"):
+        raise TypeError(f"Loaded artifact from {MODEL_PATH} does not implement predict().")
+    if not hasattr(model, "predict_proba"):
+        raise TypeError(f"Loaded artifact from {MODEL_PATH} does not implement predict_proba().")
 
-    raise FileNotFoundError(
-        f"Trained heart model not found. Expected one of: {', '.join(str(path) for path in MODEL_PATHS)}"
-    )
+    feature_names = list(getattr(model, "feature_names_in_", []) or [])
+    if feature_names and feature_names != REQUIRED_FIELDS:
+        raise ValueError(
+            "Feature order mismatch between model and training schema. "
+            f"Expected {REQUIRED_FIELDS}, got {feature_names}"
+        )
+
+    if hasattr(model, "named_steps"):
+        step_names = list(model.named_steps.keys())
+        LOGGER.info("Model pipeline steps: %s", step_names)
+
+        preprocessor = model.named_steps.get("preprocessor")
+        if preprocessor is None:
+          raise ValueError("Model pipeline is missing the preprocessor step.")
+
+        fitted_transformers = getattr(preprocessor, "transformers_", None)
+        if fitted_transformers:
+            LOGGER.info(
+                "Preprocessor transformers: %s",
+                [(name, cols) for name, _, cols in fitted_transformers],
+            )
+
+        numeric_columns = list(next((cols for name, _, cols in getattr(preprocessor, "transformers", []) if name == "numeric"), []))
+        categorical_columns = list(next((cols for name, _, cols in getattr(preprocessor, "transformers", []) if name == "categorical"), []))
+        if numeric_columns and numeric_columns != NUMERIC_FIELDS:
+            raise ValueError(f"Numeric feature order mismatch. Expected {NUMERIC_FIELDS}, got {numeric_columns}")
+        if categorical_columns and categorical_columns != CATEGORICAL_FIELDS:
+            raise ValueError(
+                f"Categorical feature order mismatch. Expected {CATEGORICAL_FIELDS}, got {categorical_columns}"
+            )
+
+        categorical_step = getattr(getattr(preprocessor, "named_transformers_", {}), "get", lambda *_: None)("categorical")
+        if categorical_step is not None and hasattr(categorical_step, "named_steps"):
+            encoder = categorical_step.named_steps.get("encoder")
+            if encoder is not None:
+                LOGGER.info("OneHotEncoder categories: %s", [list(values) for values in getattr(encoder, "categories_", [])])
+
+    return model
 
 
 def _canonical_key(key: str) -> str:
@@ -160,28 +211,41 @@ def _confidence_for_prediction(model: Any, frame: pd.DataFrame, prediction: Any)
 
 
 def predict_heart_disease(data: Any) -> dict[str, Any]:
-    model = load_model()
-    features = normalize_payload(data)
-    frame = pd.DataFrame([[features[field] for field in REQUIRED_FIELDS]], columns=REQUIRED_FIELDS)
+    try:
+        model = load_model()
+        features = normalize_payload(data)
+        frame = pd.DataFrame([[features[field] for field in REQUIRED_FIELDS]], columns=REQUIRED_FIELDS)
 
-    raw_prediction = model.predict(frame)[0]
-    status = _status_from_prediction(raw_prediction)
-    confidence = round(_confidence_for_prediction(model, frame, raw_prediction) * 100, 2)
-    risk_score = int(confidence)
-    risk_class = _risk_classification(risk_score)
-    alerts = _generate_medical_alerts(features)
-    message = _alert_message(alerts, status)
+        LOGGER.info("Feature vector before prediction: %s", frame.iloc[0].to_dict())
 
-    return {
-        "prediction": status.lower(),
-        "status": status,
-        "risk": risk_class,
-        "risk_score": risk_score,
-        "message": message,
-        "confidence": confidence,
-        "alerts": alerts,
-        "features": features,
-    }
+        raw_prediction = model.predict(frame)[0]
+        LOGGER.info("Prediction output: %s", raw_prediction)
+
+        probabilities = model.predict_proba(frame)[0]
+        classes = list(getattr(model, "classes_", []) or [])
+        if classes:
+            probability_map = {str(label): float(probabilities[index]) for index, label in enumerate(classes)}
+            LOGGER.info("Prediction probabilities: %s", probability_map)
+        else:
+            LOGGER.info("Prediction probabilities: %s", [float(value) for value in probabilities])
+
+        confidence = _confidence_for_prediction(model, frame, raw_prediction) * 100
+        confidence = round(float(confidence), 2)
+        clinical_status = _status_from_prediction(raw_prediction)
+        message = f"Model prediction completed successfully with class {clinical_status}."
+
+        return {
+            "status": "success",
+            "risk": clinical_status,
+            "prediction": str(raw_prediction),
+            "prediction_status": clinical_status,
+            "confidence": confidence,
+            "message": message,
+            "features": features,
+        }
+    except Exception:
+        LOGGER.error("Heart model prediction failed:\n%s", traceback.format_exc())
+        raise
 def _risk_classification(score: int) -> str:
     if score <= 25:
         return "Normal"

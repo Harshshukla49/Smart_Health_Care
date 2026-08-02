@@ -17,18 +17,21 @@ const toNumber = (value, fallback = 0) => {
 
 const toTimestamp = (value) => String(value || new Date().toLocaleTimeString());
 
-const toVitals = (payload = {}) => ({
-  heartRate: toNumber(payload.heartRate ?? payload.heart_rate),
-  spo2: toNumber(payload.spo2 ?? payload.SpO2),
-  temperature: toNumber(payload.temperature ?? payload.temp),
-  updatedAt: toTimestamp(payload.updatedAt || payload.timestamp),
-  // ML prediction fields
-  risk: payload.risk || '',
-  risk_score: payload.risk_score ?? undefined,
-  confidence: payload.confidence ?? undefined,
-  alerts: Array.isArray(payload.alerts) ? payload.alerts : [],
-  message: payload.message || '',
-});
+const toVitals = (payload = {}) => {
+  const prediction = payload.prediction && typeof payload.prediction === 'object' ? payload.prediction : {};
+
+  return {
+    heartRate: toNumber(payload.heartRate ?? payload.heart_rate),
+    spo2: toNumber(payload.spo2 ?? payload.SpO2),
+    temperature: toNumber(payload.temperature ?? payload.temp),
+    updatedAt: toTimestamp(payload.updatedAt || payload.timestamp),
+    risk: payload.risk || prediction.risk || '',
+    risk_score: payload.risk_score ?? prediction.risk_score ?? undefined,
+    confidence: payload.confidence ?? prediction.confidence ?? undefined,
+    alerts: Array.isArray(payload.alerts) ? payload.alerts : Array.isArray(prediction.alerts) ? prediction.alerts : [],
+    message: payload.message || prediction.message || '',
+  };
+};
 
 const sanitizeEcgArray = (input) => {
   if (!Array.isArray(input)) {
@@ -180,7 +183,11 @@ export function LiveVitalsProvider({ children }) {
 
           setPatientId(String(session.patientId));
           setPatientName(String(profile?.name || 'Patient'));
-          applyIncomingState(profile?.vitals || {});
+          applyIncomingState({
+            ...(profile?.vitals || {}),
+            ...(profile?.prediction || {}),
+            prediction: profile?.prediction || {},
+          });
           setEcgData((current) => {
             const ecg = extractEcgFromPayload(profile);
             return ecg.length ? ecg.slice(-ECG_MAX_POINTS) : current;
@@ -208,7 +215,11 @@ export function LiveVitalsProvider({ children }) {
           return;
         }
 
-        applyIncomingState(profile?.vitals || firstPatient);
+        applyIncomingState({
+          ...(profile?.vitals || firstPatient || {}),
+          ...(profile?.prediction || firstPatient?.prediction || {}),
+          prediction: profile?.prediction || firstPatient?.prediction || {},
+        });
         setEcgData((current) => {
           const ecg = extractEcgFromPayload(profile || firstPatient);
           return ecg.length ? ecg.slice(-ECG_MAX_POINTS) : current;

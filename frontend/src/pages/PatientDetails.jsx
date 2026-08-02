@@ -421,9 +421,9 @@ export function PatientDetails() {
 
           <div className="space-y-3 text-sm leading-7 text-slate-300">
             <p><span className="text-white">Patient ID:</span> {patient.id}</p>
-            <p><span className="text-white">Risk:</span> {patient?.prediction?.risk || 'Prediction unavailable'}</p>
-            <p><span className="text-white">Confidence:</span> {Number(patient?.prediction?.confidence || 0).toFixed(2)}</p>
-            <p><span className="text-white">Message:</span> {patient?.prediction?.message || 'Prediction unavailable'}</p>
+            <p><span className="text-white">Risk:</span> {patient?.prediction?.risk ?? patient?.prediction?.status ?? ''}</p>
+            <p><span className="text-white">Confidence:</span> {patient?.prediction?.confidence ?? ''}</p>
+            <p><span className="text-white">Message:</span> {patient?.prediction?.message ?? ''}</p>
           </div>
 
           <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
@@ -457,10 +457,10 @@ export function PatientDetails() {
             {audit.slice(-8).reverse().map((entry, index) => (
               <div key={`${entry.timestamp || 'ts'}-${index}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
-                  <p className="text-sm font-semibold text-white">{entry.risk || 'Prediction unavailable'} ({entry.status || 'unavailable'})</p>
+                  <p className="text-sm font-semibold text-white">{entry.risk ?? entry.status ?? ''} ({entry.status ?? ''})</p>
                   <p className="text-xs text-slate-400">{entry.timestamp || 'N/A'}</p>
                 </div>
-                <p className="mt-2 text-sm text-slate-300">{entry.message || 'Prediction unavailable'}</p>
+                <p className="mt-2 text-sm text-slate-300">{entry.message ?? ''}</p>
                 <p className="mt-2 text-xs text-slate-400">Source: {entry.source || 'unknown'} · Confidence: {Number(entry.confidence || 0).toFixed(2)}</p>
               </div>
             ))}

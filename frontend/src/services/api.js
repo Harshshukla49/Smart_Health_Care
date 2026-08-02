@@ -502,6 +502,9 @@ export const getPatientVitals = async (patientId) => {
     temperature: toNumber(payload.temperature ?? payload.temp),
     ecgData: toEcgArray(payload.ecgData || payload.ecg || payload.ecgSignal),
     updatedAt: toText(payload.updatedAt || payload.timestamp, new Date().toLocaleTimeString()),
+    risk: toText(payload.risk || payload.prediction?.risk || ''),
+    confidence: toNumber(payload.confidence ?? payload.prediction?.confidence, 0),
+    message: toText(payload.message || payload.prediction?.message || ''),
   };
 };
 
@@ -528,15 +531,15 @@ export const predictVitals = async ({ heartRate, spo2, temperature }) => {
     temperature: toNumber(temperature),
   };
   const response = await api.post('/predict', payload);
-  const prediction = toText(response.data?.prediction || response.data?.status).toLowerCase();
-  const confidence = toNumber(response.data?.confidence, 0);
 
   return {
-    success: true,
+    success: response.data?.status === 'success',
     source: 'api',
-    prediction,
-    status: prediction,
-    confidence,
+    risk: toText(response.data?.risk || ''),
+    prediction: toText(response.data?.prediction || ''),
+    status: toText(response.data?.status || ''),
+    confidence: toNumber(response.data?.confidence, 0),
+    message: toText(response.data?.message || ''),
     raw: response.data,
   };
 };
@@ -551,8 +554,11 @@ export const predictPatientRisk = async ({ heartRate, spo2, temperature }) => {
   const response = await api.post('/predict', payload);
 
   return {
-    risk: toText(response.data?.risk || response.data?.prediction || response.data?.status, 'Low'),
-    message: toText(response.data?.message, 'Vitals are stable.'),
+    risk: toText(response.data?.risk || response.data?.prediction || ''),
+    message: toText(response.data?.message || ''),
+    confidence: toNumber(response.data?.confidence, 0),
+    status: toText(response.data?.status || ''),
+    raw: response.data,
   };
 };
 
