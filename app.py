@@ -3018,6 +3018,7 @@ def get_patient_vitals(patient_id):
                     return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
 
             normalized = _normalize_patient_record(key, record, record)
+            prediction = normalized.get('prediction') if isinstance(normalized.get('prediction'), dict) else {}
             ecg_data = _sanitize_ecg_samples(
                 (normalized.get('vitals') or {}).get('ecgData')
                 or normalized.get('ecgData')
@@ -3031,6 +3032,10 @@ def get_patient_vitals(patient_id):
                     'temperature': _coerce_float((normalized.get('vitals') or {}).get('temperature') or normalized.get('temperature')),
                     'ecgData': ecg_data,
                     'updatedAt': normalized.get('updatedAt') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    'prediction': prediction,
+                    'risk': prediction.get('risk', ''),
+                    'confidence': _coerce_float(prediction.get('confidence'), 0.0),
+                    'message': prediction.get('message', ''),
                 }
             })
 

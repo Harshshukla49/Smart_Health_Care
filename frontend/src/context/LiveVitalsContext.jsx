@@ -18,18 +18,21 @@ const toNumber = (value, fallback = 0) => {
 const toTimestamp = (value) => String(value || new Date().toLocaleTimeString());
 
 const toVitals = (payload = {}) => {
-  const prediction = payload.prediction && typeof payload.prediction === 'object' ? payload.prediction : {};
+  const readings = payload.vitals && typeof payload.vitals === 'object' ? payload.vitals : payload;
+  const prediction = payload.prediction && typeof payload.prediction === 'object'
+    ? payload.prediction
+    : (readings.prediction && typeof readings.prediction === 'object' ? readings.prediction : {});
 
   return {
-    heartRate: toNumber(payload.heartRate ?? payload.heart_rate),
-    spo2: toNumber(payload.spo2 ?? payload.SpO2),
-    temperature: toNumber(payload.temperature ?? payload.temp),
-    updatedAt: toTimestamp(payload.updatedAt || payload.timestamp),
-    risk: payload.risk || prediction.risk || '',
-    risk_score: payload.risk_score ?? prediction.risk_score ?? undefined,
-    confidence: payload.confidence ?? prediction.confidence ?? undefined,
-    alerts: Array.isArray(payload.alerts) ? payload.alerts : Array.isArray(prediction.alerts) ? prediction.alerts : [],
-    message: payload.message || prediction.message || '',
+    heartRate: toNumber(readings.heartRate ?? readings.heart_rate ?? payload.heartRate ?? payload.heart_rate),
+    spo2: toNumber(readings.spo2 ?? readings.SpO2 ?? payload.spo2 ?? payload.SpO2),
+    temperature: toNumber(readings.temperature ?? readings.temp ?? payload.temperature ?? payload.temp),
+    updatedAt: toTimestamp(readings.updatedAt || readings.timestamp || payload.updatedAt || payload.timestamp),
+    risk: payload.risk || readings.risk || prediction.risk || '',
+    risk_score: payload.risk_score ?? readings.risk_score ?? prediction.risk_score ?? undefined,
+    confidence: payload.confidence ?? readings.confidence ?? prediction.confidence ?? undefined,
+    alerts: Array.isArray(payload.alerts) ? payload.alerts : Array.isArray(readings.alerts) ? readings.alerts : Array.isArray(prediction.alerts) ? prediction.alerts : [],
+    message: payload.message || readings.message || prediction.message || '',
   };
 };
 
@@ -131,7 +134,16 @@ export function LiveVitalsProvider({ children }) {
     const nextVitals = toVitals(payload.vitals || payload.data?.vitals || payload);
     const ecgFromBackend = extractEcgFromPayload(payload);
 
-    setVitals(nextVitals);
+    setVitals((current) => ({
+      ...nextVitals,
+      // Some realtime vital events contain only readings. Keep the last model
+      // result until the backend sends a newer prediction alongside them.
+      risk: nextVitals.risk || current.risk,
+      risk_score: nextVitals.risk_score ?? current.risk_score,
+      confidence: nextVitals.confidence ?? current.confidence,
+      alerts: nextVitals.alerts.length ? nextVitals.alerts : current.alerts,
+      message: nextVitals.message || current.message,
+    }));
     setEcgData((current) => {
       return ecgFromBackend.length ? appendAndTrim(current, ecgFromBackend) : current.slice(-ECG_MAX_POINTS);
     });
