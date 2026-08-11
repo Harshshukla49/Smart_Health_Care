@@ -4079,3 +4079,35 @@ if __name__ == '__main__':
         debug=debug_mode,
         allow_unsafe_werkzeug=allow_unsafe_werkzeug,
     )
+# ================= ESP32 LIVE VITALS API =================
+
+latest_data = {
+    "heartRate": 0,
+    "spo2": 0,
+    "temperature": 0,
+    "ecg": 0,
+    "leadsOff": True
+}
+
+@app.route("/api/esp32/update", methods=["POST"])
+def esp32_update():
+    global latest_data
+
+    payload = request.get_json(force=True)
+
+    latest_data = {
+        "heartRate": float(payload.get("heartRate", 0)),
+        "spo2": float(payload.get("spo2", 0)),
+        "temperature": float(payload.get("temperature", 0)),
+        "ecg": int(payload.get("ecg", 0)),
+        "leadsOff": bool(payload.get("leadsOff", True))
+    }
+
+    return jsonify({
+        "status": "received",
+        "data": latest_data
+    })
+
+@app.route("/api/live-vitals", methods=["GET"])
+def live_vitals():
+    return jsonify(latest_data)
