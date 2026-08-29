@@ -44,6 +44,11 @@ export function PatientLogin() {
         name: patient.name,
         email: patient.email,
         phone: patient.phone,
+        doctorId: patient.doctorId || patient.assignedDoctorId || '',
+        doctorEmail: patient.doctorEmail || patient.doctorContact?.email || '',
+        doctorName: patient.doctorName || patient.assignedDoctorName || patient.doctorContact?.name || '',
+        doctorPhone: patient.doctorPhone || patient.doctorContact?.phone || '',
+        doctorSpecialty: patient.doctorSpecialty || patient.doctorContact?.specialty || '',
         token: auth?.token || '',
         tokenExpiresIn: auth?.expiresIn || 0,
       });

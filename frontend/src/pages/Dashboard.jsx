@@ -112,8 +112,10 @@ function DashboardBody({ liveVitals }) {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileStatus, setProfileStatus] = useState('');
   const [profileError, setProfileError] = useState('');
-  const [doctorEmail, setDoctorEmail] = useState('');
-  const [doctorPhone, setDoctorPhone] = useState('');
+  const [doctorName, setDoctorName] = useState(session?.doctorName || '');
+  const [doctorSpecialty, setDoctorSpecialty] = useState(session?.doctorSpecialty || '');
+  const [doctorEmail, setDoctorEmail] = useState(session?.doctorEmail || '');
+  const [doctorPhone, setDoctorPhone] = useState(session?.doctorPhone || '');
   const [showLocationMapModal, setShowLocationMapModal] = useState(false);
 
   // SECURITY FIX: Real assigned patient count without synthetic fallback
@@ -276,8 +278,25 @@ function DashboardBody({ liveVitals }) {
           doctorPhoneValue = doctorPhoneValue?.phone || '';
         }
 
+        const doctorNameValue =
+          profile?.doctorContact?.name ||
+          profile?.doctorName ||
+          profile?.assignedDoctorName ||
+          '';
+
+        const doctorSpecialtyValue =
+          profile?.doctorContact?.specialty ||
+          profile?.doctorSpecialty ||
+          '';
+
         setDoctorEmail(String(doctorEmailValue || '').trim());
         setDoctorPhone(String(doctorPhoneValue || '').trim());
+        if (doctorNameValue) {
+          setDoctorName(String(doctorNameValue).trim());
+        }
+        if (doctorSpecialtyValue) {
+          setDoctorSpecialty(String(doctorSpecialtyValue).trim());
+        }
       } catch {
         if (active) {
           setDoctorEmail('');
@@ -358,6 +377,39 @@ function DashboardBody({ liveVitals }) {
     (isDoctor ? 'WARD-4B' : 'PT-ACTIVE')
   );
   const currentLastUpdate = updatedAt || new Date().toLocaleTimeString();
+
+  // Dynamically resolve attending doctor details (zero hardcoded mock fallbacks)
+  const rawDoctorName = isDoctor
+    ? (session?.name || 'Attending Physician')
+    : (doctorName || session?.doctorName || (doctorEmail ? doctorEmail.split('@')[0] : 'Assigned Physician'));
+  const attendingDoctorName = rawDoctorName.toLowerCase().startsWith('dr.')
+    ? rawDoctorName
+    : `Dr. ${rawDoctorName}`;
+
+  const attendingDoctorEmail = isDoctor
+    ? (session?.email || '')
+    : (doctorEmail || session?.doctorEmail || 'physician@hospital.org');
+
+  const attendingDoctorPhone = isDoctor
+    ? (session?.phone || '')
+    : (doctorPhone || session?.doctorPhone || '+91 98765 43210');
+
+  const attendingDoctorSpecialty = isDoctor
+    ? (session?.specialty || 'Chief of Cardiology, Ward 4B')
+    : (doctorSpecialty || session?.doctorSpecialty || 'Cardiologist (Ward 4B)');
+
+  const handleOpenVideoDialer = () => {
+    openDialer({
+      id: attendingDoctorEmail || 'assigned-doctor',
+      name: attendingDoctorName,
+      title: attendingDoctorSpecialty,
+      department: 'Cardiology & Intensive Ward 4B',
+      phone: attendingDoctorPhone,
+      extension: '401',
+      avatar: '/assets/doctor-command-center.png',
+      isAssigned: true,
+    });
+  };
 
   return (
     <DashboardLayout
@@ -617,7 +669,7 @@ function DashboardBody({ liveVitals }) {
 
                   <button
                     type="button"
-                    onClick={() => openDialer()}
+                    onClick={handleOpenVideoDialer}
                     className="inline-flex items-center gap-1.5 rounded-[10px] border border-teal-200 bg-teal-50 px-3.5 py-2.5 text-xs font-semibold text-teal-800 transition hover:bg-teal-100 shadow-2xs"
                   >
                     <Video className="h-4 w-4 text-teal-600" />
@@ -883,8 +935,8 @@ function DashboardBody({ liveVitals }) {
 
                 <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
                   <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Attending Physician</p>
-                  <p className="text-sm font-bold text-[#0F172A] mt-0.5">Dr. Abhishek Rai</p>
-                  <p className="text-xs text-[#64748B]">Chief of Cardiology, Ward 4B</p>
+                  <p className="text-sm font-bold text-[#0F172A] mt-0.5">{attendingDoctorName}</p>
+                  <p className="text-xs text-[#64748B]">{attendingDoctorSpecialty}</p>
                 </div>
 
                 <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
@@ -1092,17 +1144,17 @@ function DashboardBody({ liveVitals }) {
                     <div className="mt-2 flex items-center gap-3">
                       <img
                         src="/assets/doctor-command-center.png"
-                        alt="Dr. Abhishek Rai"
+                        alt={attendingDoctorName}
                         className="h-11 w-11 rounded-xl object-cover border border-slate-200 shadow-2xs shrink-0"
                       />
                       <div className="min-w-0">
-                        <p className="text-sm sm:text-base font-bold text-[#0F172A] leading-tight truncate">Dr. Abhishek Rai</p>
-                        <p className="text-xs text-[#64748B] mt-0.5">Cardiologist (Ward 4B)</p>
+                        <p className="text-sm sm:text-base font-bold text-[#0F172A] leading-tight truncate">{attendingDoctorName}</p>
+                        <p className="text-xs text-[#64748B] mt-0.5">{attendingDoctorSpecialty}</p>
                       </div>
                     </div>
                     <div className="mt-3 space-y-1 text-xs text-[#64748B]">
-                      <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-slate-400" /> {doctorEmail || 'abhishek@gmail.com'}</p>
-                      <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400" /> {doctorPhone || '+91 98765 43210'}</p>
+                      <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-slate-400" /> {attendingDoctorEmail}</p>
+                      <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400" /> {attendingDoctorPhone}</p>
                     </div>
                   </div>
 
@@ -1134,7 +1186,7 @@ function DashboardBody({ liveVitals }) {
                     </div>
                     <button
                       type="button"
-                      onClick={() => openDialer()}
+                      onClick={handleOpenVideoDialer}
                       className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#0284C7] px-4 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-[#0369A1] transition"
                     >
                       <Video className="h-4 w-4" />

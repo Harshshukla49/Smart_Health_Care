@@ -16,7 +16,7 @@ export const HOSPITAL_PHYSICIANS = [
     extension: '401',
     avatar: '/assets/doctor-command-center.png',
     status: 'online',
-    isAssigned: true,
+    isAssigned: false,
   },
   {
     id: 'DOC-EM-02',
@@ -324,7 +324,24 @@ export function VideoCallProvider({ children }) {
     if (defaultDoctor) {
       setDialerDefaultDoctor(defaultDoctor);
     } else {
-      setDialerDefaultDoctor(HOSPITAL_PHYSICIANS[0]);
+      const currentSession = getAuthSession();
+      if (currentSession?.doctorName || currentSession?.doctorEmail) {
+        const rawName = currentSession?.doctorName || (currentSession?.doctorEmail ? currentSession.doctorEmail.split('@')[0] : 'Assigned Physician');
+        setDialerDefaultDoctor({
+          id: currentSession?.doctorEmail || 'DOC-ASSIGNED',
+          name: rawName.toLowerCase().startsWith('dr.') ? rawName : `Dr. ${rawName}`,
+          role: 'doctor',
+          title: currentSession?.doctorSpecialty || 'Attending Physician',
+          department: 'Cardiology & Intensive Ward 4B',
+          phone: currentSession?.doctorPhone || '+91 98765 43210',
+          extension: '401',
+          avatar: '/assets/doctor-command-center.png',
+          status: 'online',
+          isAssigned: true,
+        });
+      } else {
+        setDialerDefaultDoctor(HOSPITAL_PHYSICIANS[0]);
+      }
     }
     setIsDialerOpen(true);
   }, []);
@@ -346,13 +363,13 @@ export function VideoCallProvider({ children }) {
       callerPhone: '+91 86018 45515',
       patientId: isDoctor ? (targetDoctor.patientId || targetDoctor.id || '') : currentUserId,
       patientName: isDoctor ? (targetDoctor.patientName || targetDoctor.name || 'Patient') : currentUserName,
-      recipientId: targetDoctor.id || targetDoctor.email || 'DOC-4B-01',
-      recipientName: targetDoctor.name || 'Dr. Abhishek Rai',
-      recipientTitle: targetDoctor.title || 'Cardiologist',
+      recipientId: targetDoctor.id || targetDoctor.email || 'DOC-ASSIGNED',
+      recipientName: targetDoctor.name || (isDoctor ? (targetDoctor.patientName || 'Patient') : 'Assigned Physician'),
+      recipientTitle: targetDoctor.title || 'Attending Physician',
       recipientDepartment: targetDoctor.department || 'Ward 4B',
       recipientPhone: targetDoctor.phone || '+91 98765 43210',
       recipientExtension: targetDoctor.extension || '401',
-      doctorName: targetDoctor.name || 'Dr. Abhishek Rai',
+      doctorName: targetDoctor.doctorName || targetDoctor.name || (isDoctor ? currentUserName : 'Assigned Physician'),
       dialedNumber: targetDoctor.dialedNumber || targetDoctor.phone || targetDoctor.extension,
       isAssignedDoctor: Boolean(targetDoctor.isAssigned),
       vitalsSnapshot: {
@@ -473,10 +490,10 @@ export function VideoCallProvider({ children }) {
       patientId: 'PAT-2026-2007',
       patientName: 'Akash Soni',
       recipientId: currentUserId,
-      recipientName: isDoctor ? currentUserName : 'Dr. Abhishek Rai',
-      recipientTitle: 'Chief of Cardiology',
+      recipientName: isDoctor ? currentUserName : (session?.doctorName || 'Assigned Physician'),
+      recipientTitle: isDoctor ? (session?.specialty || 'Attending Physician') : 'Attending Physician',
       recipientDepartment: 'Cardiology Ward 4B',
-      doctorName: isDoctor ? currentUserName : 'Dr. Abhishek Rai',
+      doctorName: isDoctor ? currentUserName : (session?.doctorName || 'Assigned Physician'),
       isAssignedDoctor: true,
       vitalsSnapshot: {
         heartRate: 74,

@@ -25,6 +25,7 @@ import { useEmergency } from '../../context/EmergencyContext';
 import { EmergencyMap } from './EmergencyMap';
 import { AmbulanceRequestModal } from './AmbulanceRequestModal';
 import { formatLocationLink } from '../../services/geolocation';
+import { getAuthSession } from '../../utils/auth';
 
 export function EmergencyBannerModal() {
   const {
@@ -62,8 +63,13 @@ export function EmergencyBannerModal() {
 
   const googleMapsUrl = formatLocationLink(coords.latitude, coords.longitude);
 
+  const session = getAuthSession();
+  const rawDocName = activeEmergency?.doctorName || activeEmergency?.assignedDoctorName || session?.doctorName || 'Assigned Physician';
+  const doctorName = rawDocName.toLowerCase().startsWith('dr.') ? rawDocName : `Dr. ${rawDocName}`;
+  const doctorPhone = activeEmergency?.doctorPhone || session?.doctorPhone || '+919876543210';
+
   const handleCallDoctor = () => {
-    window.open('tel:+919876543210');
+    window.open(`tel:${String(doctorPhone).replace(/[^0-9+]/g, '')}`);
   };
 
   const handleCallSos = () => {
@@ -168,7 +174,7 @@ export function EmergencyBannerModal() {
                 </p>
                 <p className="flex items-center gap-2 text-emerald-700 font-bold">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  Attending physician notified (Dr. Abhishek Rai)
+                  Attending physician notified ({doctorName})
                 </p>
                 <p className="flex items-center gap-2 text-emerald-700 font-bold">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
@@ -241,7 +247,7 @@ export function EmergencyBannerModal() {
                 <Phone className="h-5 w-5 text-sky-600 shrink-0" />
                 <div className="min-w-0">
                   <span className="block text-xs sm:text-sm font-bold truncate">Call Doctor</span>
-                  <span className="block text-[10px] text-slate-500 truncate">Dr. Abhishek Rai</span>
+                  <span className="block text-[10px] text-slate-500 truncate">{doctorName}</span>
                 </div>
               </button>
 

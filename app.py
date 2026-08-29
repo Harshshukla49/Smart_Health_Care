@@ -117,7 +117,12 @@ def add_patient(doctor_id):
             return api_error('A patient with this phone already exists.', 409)
 
     patient_id = _generate_patient_id()
-    now = _utc_now_iso()
+    doctor_ref = _doctor_collection_reference().child(requester_doctor_id.replace('.', ','))
+    doctor = doctor_ref.get() or {}
+    doc_name = str(doctor.get('name') or '').strip()
+    doc_phone = str(doctor.get('phone') or '').strip()
+    doc_specialty = str(doctor.get('specialty') or 'Cardiologist (Ward 4B)').strip()
+
     patient_record = {
         'patientId': patient_id,
         'name': data['name'].strip(),
@@ -128,6 +133,17 @@ def add_patient(doctor_id):
         'doctorId': requester_doctor_id,
         'assignedDoctorId': requester_doctor_id,
         'doctorEmail': requester_doctor_id,
+        'doctorName': doc_name,
+        'assignedDoctorName': doc_name,
+        'doctorPhone': doc_phone,
+        'doctorSpecialty': doc_specialty,
+        'doctorContact': {
+            'id': requester_doctor_id,
+            'name': doc_name,
+            'email': requester_doctor_id,
+            'phone': doc_phone,
+            'specialty': doc_specialty,
+        },
         'createdAt': now,
         'updatedAt': now,
         'medicines': [],
@@ -135,9 +151,6 @@ def add_patient(doctor_id):
     # Store patient
     patient_ref.child(patient_id).set(patient_record)
 
-    # Link patient to doctor (add patientId to doctor's patient list)
-    doctor_ref = _doctor_collection_reference().child(requester_doctor_id.replace('.', ','))
-    doctor = doctor_ref.get() or {}
     doctor_patients = doctor.get('patients', [])
     if patient_id not in doctor_patients:
         doctor_patients.append(patient_id)
@@ -1883,6 +1896,52 @@ def _normalize_patient_record(patient_id, payload, existing_record=None):
         'updatedAt': payload.get('updatedAt'),
     }))
 
+    doc_id = str(
+        payload.get('doctorId')
+        or payload.get('assignedDoctorId')
+        or payload.get('doctorEmail')
+        or (existing_record or {}).get('doctorId')
+        or (existing_record or {}).get('assignedDoctorId')
+        or (existing_record or {}).get('doctorEmail')
+        or ''
+    ).strip().lower()
+
+    doc_name = str(
+        payload.get('doctorName')
+        or payload.get('assignedDoctorName')
+        or (existing_record or {}).get('doctorName')
+        or (existing_record or {}).get('assignedDoctorName')
+        or ''
+    ).strip()
+
+    doc_phone = str(
+        payload.get('doctorPhone')
+        or (existing_record or {}).get('doctorPhone')
+        or ''
+    ).strip()
+
+    doc_specialty = str(
+        payload.get('doctorSpecialty')
+        or (existing_record or {}).get('doctorSpecialty')
+        or ''
+    ).strip()
+
+    if doc_id:
+        try:
+            doc_record = _doctor_collection_reference().child(doc_id.replace('.', ',')).get()
+            if isinstance(doc_record, dict):
+                if not doc_name and doc_record.get('name'):
+                    doc_name = str(doc_record.get('name')).strip()
+                if not doc_phone and doc_record.get('phone'):
+                    doc_phone = str(doc_record.get('phone')).strip()
+                if not doc_specialty and doc_record.get('specialty'):
+                    doc_specialty = str(doc_record.get('specialty')).strip()
+        except Exception:
+            pass
+
+    if not doc_specialty:
+        doc_specialty = 'Cardiologist (Ward 4B)'
+
     record = {
         'id': patient_id,
         'patientId': patient_id,
@@ -1891,9 +1950,20 @@ def _normalize_patient_record(patient_id, payload, existing_record=None):
         'gender': payload.get('gender') or (existing_record or {}).get('gender') or '',
         'phone': payload.get('phone') or payload.get('phoneNumber') or (existing_record or {}).get('phone') or '',
         'email': payload.get('email') or (existing_record or {}).get('email') or '',
-        'doctorId': str(payload.get('doctorId') or (existing_record or {}).get('doctorId') or '').strip().lower(),
-        'doctorEmail': str(payload.get('doctorEmail') or (existing_record or {}).get('doctorEmail') or '').strip().lower(),
-        'doctorPhone': str(payload.get('doctorPhone') or (existing_record or {}).get('doctorPhone') or '').strip(),
+        'doctorId': doc_id,
+        'assignedDoctorId': doc_id,
+        'doctorEmail': doc_id,
+        'doctorName': doc_name,
+        'assignedDoctorName': doc_name,
+        'doctorPhone': doc_phone,
+        'doctorSpecialty': doc_specialty,
+        'doctorContact': {
+            'id': doc_id,
+            'name': doc_name,
+            'email': doc_id,
+            'phone': doc_phone,
+            'specialty': doc_specialty,
+        },
         'symptoms': payload.get('symptoms') or (existing_record or {}).get('symptoms') or '',
         'heartRate': heart_rate,
         'spo2': spo2,
@@ -1985,28 +2055,46 @@ def _build_patient_payload_response(patient_id, normalized):
     }
 
     # Fetch doctor info if not in the patient record
-    doctor_email = str(normalized.get('doctorEmail') or '').strip().lower()
+    doctor_email = str(normalized.get('doctorEmail') or normalized.get('doctorId') or '').strip().lower()
+    doctor_name = str(normalized.get('doctorName') or normalized.get('assignedDoctorName') or '').strip()
     doctor_phone = str(normalized.get('doctorPhone') or '').strip()
-    
-    if doctor_email and not doctor_phone:
+    doctor_specialty = str(normalized.get('doctorSpecialty') or 'Cardiologist (Ward 4B)').strip()
+
+    if doctor_email and (not doctor_name or not doctor_phone):
         try:
             doctor_record = _doctor_collection_reference().child(doctor_email.replace('.', ',')).get()
             if doctor_record and isinstance(doctor_record, dict):
-                doctor_phone = str(doctor_record.get('phone') or '').strip()
+                if not doctor_phone and doctor_record.get('phone'):
+                    doctor_phone = str(doctor_record.get('phone')).strip()
+                if not doctor_name and doctor_record.get('name'):
+                    doctor_name = str(doctor_record.get('name')).strip()
+                if doctor_record.get('specialty'):
+                    doctor_specialty = str(doctor_record.get('specialty')).strip()
         except Exception:
             pass
 
     return {
         'id': patient_id,
+        'patientId': patient_id,
         'name': normalized.get('name'),
         'vitals': vitals,
         'ecgData': ecg_data,
         'prediction': prediction,
         'deviceConnected': bool(normalized.get('deviceConnected', False)),
         'dataSource': normalized.get('dataSource') or 'dataset',
+        'doctorId': doctor_email,
+        'assignedDoctorId': doctor_email,
+        'doctorEmail': doctor_email,
+        'doctorName': doctor_name,
+        'assignedDoctorName': doctor_name,
+        'doctorPhone': doctor_phone,
+        'doctorSpecialty': doctor_specialty,
         'doctorContact': {
-            'email': doctor_email or '',
-            'phone': doctor_phone or '',
+            'id': doctor_email,
+            'name': doctor_name,
+            'email': doctor_email,
+            'phone': doctor_phone,
+            'specialty': doctor_specialty,
         },
         'predictionAudit': normalized.get('predictionAudit', [])[-20:],
     }
@@ -2763,6 +2851,17 @@ def add_patient_legacy():
         payload['doctorEmail'] = doctor_id
         payload['assignedDoctorId'] = doctor_id
         payload['doctorPhone'] = doctor_phone
+        try:
+            doc_rec = _doctor_collection_reference().child(doctor_id.replace('.', ',')).get() or {}
+            doc_name = str(doc_rec.get('name') or '').strip()
+            doc_spec = str(doc_rec.get('specialty') or 'Cardiologist (Ward 4B)').strip()
+            payload['doctorName'] = doc_name
+            payload['assignedDoctorName'] = doc_name
+            payload['doctorSpecialty'] = doc_spec
+        except Exception:
+            payload['doctorName'] = ''
+            payload['assignedDoctorName'] = ''
+            payload['doctorSpecialty'] = 'Cardiologist (Ward 4B)'
 
         required_fields = ['name', 'age', 'gender', 'phone', 'email', 'symptoms']
         missing_fields = [field for field in required_fields if payload.get(field) in (None, '')]
@@ -2869,6 +2968,11 @@ def login_patient():
             'name': normalized.get('name') or 'Patient',
             'email': normalized.get('email') or '',
             'phone': normalized.get('phone') or '',
+            'doctorId': normalized.get('doctorId') or '',
+            'doctorEmail': normalized.get('doctorEmail') or '',
+            'doctorName': normalized.get('doctorName') or '',
+            'doctorPhone': normalized.get('doctorPhone') or '',
+            'doctorSpecialty': normalized.get('doctorSpecialty') or '',
         })
         return api_success('Patient login successful.', {
             'patient': _sanitize_patient_response(normalized),

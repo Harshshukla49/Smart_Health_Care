@@ -78,7 +78,7 @@ export function ActiveVideoCallModal() {
 
           <div>
             <h3 className="text-2xl font-black text-[#0F172A]">
-              {activeCall?.recipientName || 'Dr. Abhishek Rai'}
+              {activeCall?.recipientName || activeCall?.doctorName || 'Assigned Physician'}
             </h3>
             <p className="text-sm font-semibold text-[#0284C7] mt-0.5">
               {activeCall?.recipientTitle || 'Chief of Cardiology'}
@@ -134,7 +134,7 @@ export function ActiveVideoCallModal() {
             <div>
               <div className="flex items-center gap-2">
                 <span className="text-sm sm:text-base font-bold text-white">
-                  {activeCall?.recipientName || activeCall?.doctorName || 'Dr. Abhishek Rai'}
+                  {activeCall?.recipientName || activeCall?.doctorName || 'Assigned Physician'}
                 </span>
                 <span className="rounded-full bg-teal-500/20 text-teal-300 border border-teal-500/30 px-2 py-0.5 text-[10px] font-bold">
                   LIVE TELEHEALTH
@@ -169,7 +169,7 @@ export function ActiveVideoCallModal() {
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               <div>
                 <p className="font-bold leading-none">
-                  {activeCall?.recipientName || 'Dr. Abhishek Rai'}
+                  {activeCall?.recipientName || activeCall?.doctorName || 'Assigned Physician'}
                 </p>
                 <p className="text-[10px] text-slate-400 leading-tight mt-0.5">Cardiology Tele-Feed (250 Hz)</p>
               </div>

@@ -27,9 +27,9 @@ export function VideoCallDialerModal() {
 
   if (!isDialerOpen) return null;
 
-  // First preference doctor is the assigned cardiologist (or default provided)
-  const assignedDoctor = HOSPITAL_PHYSICIANS.find((d) => d.isAssigned) || dialerDefaultDoctor || HOSPITAL_PHYSICIANS[0];
-  const otherPhysicians = HOSPITAL_PHYSICIANS.filter((d) => d.id !== assignedDoctor.id);
+  // First preference doctor is the patient's assigned doctor (or provided default)
+  const assignedDoctor = dialerDefaultDoctor || HOSPITAL_PHYSICIANS.find((d) => d.isAssigned) || HOSPITAL_PHYSICIANS[0];
+  const otherPhysicians = HOSPITAL_PHYSICIANS.filter((d) => d.id !== assignedDoctor.id && d.name !== assignedDoctor.name);
 
   // Dial pad keys
   const dialKeys = [
