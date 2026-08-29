@@ -360,10 +360,17 @@ function DashboardBody({ liveVitals }) {
       activeSection={activeSection}
       onSectionSelect={(sec) => setActiveSection(sec)}
     >
-      {loading ? <Loader label={t('dashboard.loadingVitals')} /> : null}
+      {loading ? (
+        <div className="mb-4 flex items-center justify-between rounded-xl border border-sky-200 bg-sky-50 px-4 py-2.5 text-xs text-sky-800 backdrop-blur-xs">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-sky-500 animate-ping" />
+            <span className="font-semibold">{t('dashboard.loadingVitals') || 'Connecting to clinical telemetry hub... Synchronizing patient records.'}</span>
+          </div>
+          <span className="text-[11px] text-sky-600 font-mono">Syncing Telemetry</span>
+        </div>
+      ) : null}
 
-      {!loading ? (
-        <div className="space-y-6 sm:space-y-7 lg:space-y-8 pb-12">
+      <div className="space-y-6 sm:space-y-7 lg:space-y-8 pb-12">
           {/* =======================================================
               🚨 DOCTOR EMERGENCY ALERTS CENTER (IF DOCTOR & ACTIVE ALERTS)
              ======================================================= */}
@@ -1369,7 +1376,6 @@ function DashboardBody({ liveVitals }) {
             </Card>
           </section>
         </div>
-      ) : null}
 
       {/* Location Consent Dialog */}
       <LocationConsentModal

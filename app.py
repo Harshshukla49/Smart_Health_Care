@@ -1,6 +1,6 @@
 import re
 
-from flask import Flask, abort
+from flask import Flask, abort, send_from_directory
 from functools import wraps
 
 app = Flask(__name__)
@@ -204,6 +204,16 @@ vitals_model = None
 vitals_model_classes = []
 chat_user_connections = {}
 chat_sid_context = {}
+
+if not VITAL_MODEL_PATH.exists():
+    dataset_path = BASE_DIR / "datasetheartrate" / "vitals_dataset.csv"
+    if dataset_path.exists():
+        try:
+            print(f"Vitals model not found at {VITAL_MODEL_PATH}. Auto-training from {dataset_path}...")
+            from model import train_vitals_model
+            train_vitals_model(dataset_path, VITAL_MODEL_PATH)
+        except Exception as err:
+            print(f"Auto-train of vitals model failed: {err}")
 
 if VITAL_MODEL_PATH.exists():
     try:
@@ -2590,6 +2600,10 @@ def send_email_alert(prediction, hr, spo2, temp):
 
 @app.route('/')
 def home():
+    frontend_dist = BASE_DIR / 'frontend' / 'dist'
+    index_file = frontend_dist / 'index.html'
+    if frontend_dist.exists() and index_file.is_file():
+        return send_from_directory(str(frontend_dist), 'index.html')
     return jsonify({"status": "ok", "message": "Smart Healthcare Backend Running"})
 
 # SECURITY FIX: Strict authentication and doctor-patient isolation on /real-data
@@ -4630,6 +4644,24 @@ def emergency_nearby_facilities():
         })
     except Exception as err:
         return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route('/<path:path>')
+def serve_frontend_assets_or_spa(path):
+    # Never intercept backend API routes
+    if path.startswith('api/') or path in ['patients', 'real-data', 'health', 'socket.io']:
+        return jsonify({"status": "error", "message": f"Endpoint /{path} not found"}), 404
+
+    frontend_dist = BASE_DIR / 'frontend' / 'dist'
+    if frontend_dist.exists():
+        candidate_file = frontend_dist / path
+        if candidate_file.is_file():
+            return send_from_directory(str(frontend_dist), path)
+        index_file = frontend_dist / 'index.html'
+        if index_file.is_file():
+            return send_from_directory(str(frontend_dist), 'index.html')
+
+    return jsonify({"status": "error", "message": f"Endpoint /{path} not found"}), 404
 
 
 if __name__ == '__main__':

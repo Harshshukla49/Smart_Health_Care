@@ -37,14 +37,34 @@ import axios from 'axios';
 import { fallbackPatients } from '../data/demoData';
 import { getAuthSession } from '../utils/auth';
 
+export const resolveApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.trim()) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, origin } = window.location;
+    if (hostname === 'localhost' || hostname === '127.0.0.1') {
+      return 'http://localhost:5000';
+    }
+    // If running on a Render service where Flask also hosts the UI
+    if (hostname.includes('backend') || hostname.includes('onrender.com')) {
+      return origin;
+    }
+  }
+
+  return 'https://smart-health-backend-2idf.onrender.com';
+};
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com',
-  timeout: 60000,
+  baseURL: resolveApiBaseUrl(),
+  timeout: 15000,
 });
 
 const sosApi = axios.create({
   baseURL: import.meta.env.VITE_SOS_API_BASE_URL || 'http://localhost:5001',
-  timeout: 60000,
+  timeout: 15000,
 });
 
 const PATIENT_STORAGE_KEY = 'smart-health-patients';
@@ -231,20 +251,38 @@ export const savePatientLocally = (patient) => {
 };
 
 const extractPatientArray = (payload) => {
+  if (!payload) {
+    return [];
+  }
+
   if (Array.isArray(payload)) {
     return payload;
   }
 
-  if (payload && Array.isArray(payload.patients)) {
+  if (Array.isArray(payload.patients)) {
     return payload.patients;
   }
 
-  if (payload && payload.data) {
+  if (payload.data) {
     return extractPatientArray(payload.data);
   }
 
-  if (payload && typeof payload === 'object') {
-    return Object.entries(payload).map(([id, value]) => ({ id, ...(value || {}) }));
+  // If payload is an error response or metadata, do NOT treat its properties as patient records!
+  if (payload.status === 'error' || payload.error || typeof payload.message === 'string') {
+    return [];
+  }
+
+  if (typeof payload === 'object') {
+    const entries = Object.entries(payload).filter(
+      ([key, val]) =>
+        !['status', 'message', 'meta', 'requestId', 'timestamp', 'success', 'classes', 'featureColumns'].includes(key) &&
+        val &&
+        typeof val === 'object' &&
+        !Array.isArray(val)
+    );
+    if (entries.length > 0) {
+      return entries.map(([id, value]) => ({ id, ...(value || {}) }));
+    }
   }
 
   return [];

@@ -178,6 +178,13 @@ export function LiveVitalsProvider({ children }) {
   useEffect(() => {
     let active = true;
 
+    // Safety timeout: Never freeze the UI in an infinite loading state (e.g. Render cold start)
+    const safetyUnblockTimer = window.setTimeout(() => {
+      if (active) {
+        setLoading(false);
+      }
+    }, 3500);
+
     const resolvePatientContext = async () => {
       setLoading(true);
       setError('');
@@ -194,7 +201,7 @@ export function LiveVitalsProvider({ children }) {
           }
 
           setPatientId(String(session.patientId));
-          setPatientName(String(profile?.name || 'Patient'));
+          setPatientName(String(profile?.name || session?.name || 'Patient'));
           applyIncomingState({
             ...(profile?.vitals || {}),
             ...(profile?.prediction || {}),
@@ -208,38 +215,41 @@ export function LiveVitalsProvider({ children }) {
         }
 
         // Doctor: Fetch only doctor's assigned patients
-        const patients = await getPatients();
-        if (!active) {
+        if (role === 'doctor') {
+          const patients = await getPatients();
+          if (!active) {
+            return;
+          }
+
+          const firstPatient = Array.isArray(patients) && patients.length ? patients[0] : null;
+
+          // If doctor has NO assigned patients, do NOT fall back to Akash Soni or demo data
+          if (!firstPatient?.id) {
+            setPatientId('');
+            setPatientName('');
+            setError('No assigned patients under your care yet. Add a patient to begin live monitoring.');
+            return;
+          }
+
+          setPatientId(String(firstPatient.id));
+          setPatientName(String(firstPatient.name || 'Patient'));
+
+          const profile = await getApiPatientById(firstPatient.id);
+          if (!active) {
+            return;
+          }
+
+          applyIncomingState({
+            ...(profile?.vitals || firstPatient || {}),
+            ...(profile?.prediction || firstPatient?.prediction || {}),
+            prediction: profile?.prediction || firstPatient?.prediction || {},
+          });
+          setEcgData((current) => {
+            const ecg = extractEcgFromPayload(profile || firstPatient);
+            return ecg.length ? ecg.slice(-ECG_MAX_POINTS) : current;
+          });
           return;
         }
-
-        const firstPatient = Array.isArray(patients) && patients.length ? patients[0] : null;
-
-        // If doctor has NO assigned patients, do NOT fall back to Akash Soni or demo data
-        if (!firstPatient?.id) {
-          setPatientId('');
-          setPatientName('');
-          setError('No assigned patients under your care yet. Add a patient to begin live monitoring.');
-          return;
-        }
-
-        setPatientId(String(firstPatient.id));
-        setPatientName(String(firstPatient.name || 'Patient'));
-
-        const profile = await getApiPatientById(firstPatient.id);
-        if (!active) {
-          return;
-        }
-
-        applyIncomingState({
-          ...(profile?.vitals || firstPatient || {}),
-          ...(profile?.prediction || firstPatient?.prediction || {}),
-          prediction: profile?.prediction || firstPatient?.prediction || {},
-        });
-        setEcgData((current) => {
-          const ecg = extractEcgFromPayload(profile || firstPatient);
-          return ecg.length ? ecg.slice(-ECG_MAX_POINTS) : current;
-        });
       } catch (requestError) {
         if (!active) {
           return;
@@ -248,6 +258,7 @@ export function LiveVitalsProvider({ children }) {
         const message = requestError?.response?.data?.message || requestError?.message || 'Unable to initialize live vitals.';
         setError(message);
       } finally {
+        window.clearTimeout(safetyUnblockTimer);
         if (active) {
           setLoading(false);
         }
@@ -258,6 +269,7 @@ export function LiveVitalsProvider({ children }) {
 
     return () => {
       active = false;
+      window.clearTimeout(safetyUnblockTimer);
       clearTimers();
       clearSocket();
     };
