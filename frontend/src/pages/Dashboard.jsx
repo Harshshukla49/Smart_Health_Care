@@ -347,8 +347,16 @@ function DashboardBody({ liveVitals }) {
   };
 
   // SECURITY FIX: Remove hardcoded patient fallback; display real assigned patient or clinical empty state
-  const currentPatientName = patientName || (doctorPatients.length > 0 ? doctorPatients[0].name : (isDoctor ? 'No Assigned Patients' : 'Patient'));
-  const currentPatientId = patientId || (doctorPatients.length > 0 ? (doctorPatients[0].patientId || doctorPatients[0].id) : (isDoctor ? 'N/A' : ''));
+  const rawPatientName =
+    patientName ||
+    (Array.isArray(doctorPatients) && doctorPatients.length > 0 && doctorPatients[0]?.name ? doctorPatients[0].name : '') ||
+    (isDoctor ? 'Clinical Ward' : (session?.name || 'Patient'));
+  const currentPatientName = String(rawPatientName || (isDoctor ? 'Clinical Ward' : 'Patient')).trim();
+  const currentPatientId = String(
+    patientId ||
+    (Array.isArray(doctorPatients) && doctorPatients.length > 0 ? (doctorPatients[0]?.patientId || doctorPatients[0]?.id) : '') ||
+    (isDoctor ? 'WARD-4B' : 'PT-ACTIVE')
+  );
   const currentLastUpdate = updatedAt || new Date().toLocaleTimeString();
 
   return (
@@ -476,7 +484,7 @@ function DashboardBody({ liveVitals }) {
                       Emergency Readiness
                     </p>
                     <p className="mt-1.5 font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
-                      {emergency.locationStatus === 'active' ? 'GPS Locked' : 'Standby'}
+                      {emergency?.locationStatus === 'active' ? 'GPS Locked' : 'Standby'}
                     </p>
                     <p className="mt-1 text-xs font-medium text-[#64748B]">
                       Ambulance API active
@@ -943,19 +951,26 @@ function DashboardBody({ liveVitals }) {
 
             <AlertsPanel
               alerts={
-                alerts && alerts.length > 0
-                  ? alerts.map((alt, idx) => ({
-                      code: `alt-${idx}`,
-                      type:
-                        alt.toLowerCase().includes('critical') || alt.toLowerCase().includes('emergency')
-                          ? 'critical'
-                          : alt.toLowerCase().includes('warning')
-                          ? 'warning'
-                          : 'normal',
-                      title: alt,
-                      description: message || 'Continuous telemetry threshold evaluated.',
-                      time: '14:32',
-                    }))
+                Array.isArray(alerts) && alerts.length > 0
+                  ? alerts.map((alt, idx) => {
+                      const text = typeof alt === 'string' ? alt : String(alt?.message || alt?.title || alt?.text || 'Telemetry alert');
+                      const lower = text.toLowerCase();
+                      const alertType =
+                        (typeof alt === 'object' && alt?.type)
+                          ? alt.type
+                          : (lower.includes('critical') || lower.includes('emergency')
+                              ? 'critical'
+                              : lower.includes('warning')
+                              ? 'warning'
+                              : 'normal');
+                      return {
+                        code: (typeof alt === 'object' && alt?.code) || `alt-${idx}`,
+                        type: alertType,
+                        title: (typeof alt === 'object' && alt?.title) || text,
+                        description: (typeof alt === 'object' && alt?.description) || message || 'Continuous telemetry threshold evaluated.',
+                        time: (typeof alt === 'object' && alt?.time) || '14:32',
+                      };
+                    })
                   : [
                       {
                         code: 'alt-norm',
@@ -1310,16 +1325,16 @@ function DashboardBody({ liveVitals }) {
 
               <div className="mt-4 rounded-xl border border-slate-200/80 bg-slate-50/70 p-3.5 flex items-center gap-3.5">
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-sky-100 border border-sky-200 text-sm font-bold text-sky-700">
-                  {currentPatientName.slice(0, 2).toUpperCase()}
+                  {(String(currentPatientName || (isDoctor ? 'DOC' : 'PT'))).slice(0, 2).toUpperCase()}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="font-sans text-base font-bold text-slate-900 truncate">
                     {currentPatientName}
                   </p>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500 mt-0.5">
-                    <span>Male · 24 Years</span>
+                    <span>{isDoctor ? 'Ward 4B Active Scope' : 'Patient Telemetry Connected'}</span>
                     <span className="flex items-center gap-1">
-                      <MapPin className="h-3.5 w-3.5 text-slate-400" /> Delhi, India
+                      <MapPin className="h-3.5 w-3.5 text-slate-400" /> New Delhi, India
                     </span>
                   </div>
                 </div>

@@ -64,7 +64,7 @@ export function DoctorLogin() {
       });
 
       toast.success(t('auth.rolePage.doctorLoginSuccess') || 'Clinical session authorized.');
-      navigate(getDashboardPathForRole('doctor'), { replace: true });
+      navigate('/welcome', { replace: true });
     } catch (requestError) {
       const message =
         requestError?.response?.data?.message ||

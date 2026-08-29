@@ -26,9 +26,14 @@ class ErrorBoundary extends React.Component {
           <div style={{ maxWidth: '460px', width: '100%', background: 'rgba(30, 41, 59, 0.95)', border: '1px solid rgba(148, 163, 184, 0.2)', borderRadius: '24px', padding: '32px', textAlign: 'center', boxShadow: '0 25px 60px rgba(0,0,0,0.5)' }}>
             <div style={{ fontSize: '42px', marginBottom: '12px' }}>🏥</div>
             <h2 style={{ fontSize: '20px', fontWeight: 'bold', margin: '0 0 8px 0', color: '#fff' }}>Smart Healthcare Telemetry Portal</h2>
-            <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.6', margin: '0 0 24px 0' }}>
+            <p style={{ fontSize: '13px', color: '#94A3B8', lineHeight: '1.6', margin: '0 0 16px 0' }}>
               The portal encountered a display synchronization state. Your medical records, authentication, and clinical data remain secure.
             </p>
+            {this.state.error?.message && (
+              <div style={{ fontSize: '11px', color: '#FCA5A5', background: 'rgba(0,0,0,0.35)', border: '1px solid rgba(239, 68, 68, 0.25)', padding: '8px 12px', borderRadius: '10px', marginBottom: '20px', fontFamily: 'monospace', wordBreak: 'break-word', textAlign: 'left' }}>
+                {this.state.error.message}
+              </div>
+            )}
             <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"

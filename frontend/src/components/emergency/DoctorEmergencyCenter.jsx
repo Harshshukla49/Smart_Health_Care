@@ -28,7 +28,7 @@ export function DoctorEmergencyCenter() {
   const [showAll, setShowAll] = useState(false);
 
   // Combine live active emergency if doctor is viewing patient
-  const displayAlerts = doctorActiveEmergencies.length > 0
+  const displayAlerts = Array.isArray(doctorActiveEmergencies) && doctorActiveEmergencies.length > 0
     ? doctorActiveEmergencies
     : activeEmergency
     ? [activeEmergency]
