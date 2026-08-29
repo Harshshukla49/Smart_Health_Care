@@ -2,7 +2,20 @@ import React, { useMemo, useState } from 'react';
 import toast from 'react-hot-toast';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { ArrowLeft, ArrowRight, HeartPulse, LoaderCircle, Lock, Mail, Phone, ShieldCheck, User } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Heart,
+  HeartPulse,
+  LoaderCircle,
+  Lock,
+  Mail,
+  Phone,
+  ShieldCheck,
+  Stethoscope,
+  User,
+  UserRound,
+} from 'lucide-react';
 import { Button } from './Button';
 import { OtpPasswordReset } from './OtpPasswordReset';
 import { getDashboardPathForRole, setAuthSession } from '../utils/auth';
@@ -60,124 +73,129 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
       return;
     }
 
-    if (role === 'doctor' && isSignup && name.trim().length < 2) {
-      setError(t('auth.rolePage.doctorNameRequired'));
-      return;
-    }
-
-    if (role === 'doctor' && isSignup && phone.trim().length < 8) {
-      setError(t('auth.rolePage.doctorPhoneRequired'));
-      return;
-    }
-
     setLoading(true);
     setError('');
 
     try {
-      if (role === 'doctor') {
-        let result = null;
-        if (isSignup) {
-          result = await signupDoctor({
-            name,
-            email,
-            phone,
-            password,
-          });
-        } else {
-          result = await loginDoctor({ email, password });
-        }
-
-        const doctor = result?.doctor || null;
-        const auth = result?.auth || null;
-
+      if (isSignup && isDoctor) {
+        await signupDoctor({ name, email, password, phone });
+        toast.success(t('auth.rolePage.doctorSignupSuccess'));
+        navigate('/login/doctor');
+      } else if (!isSignup && isDoctor) {
+        const result = await loginDoctor({ email, password });
+        const doctor = result?.doctor;
+        const auth = result?.auth;
         setAuthSession({
-          role,
-          email: doctor?.email || email,
-          name: doctor?.name || name || email.split('@')[0],
-          phone: doctor?.phone || phone,
+          role: 'doctor',
+          doctorId: doctor.doctorId || doctor.email,
+          name: doctor.name,
+          email: doctor.email,
+          phone: doctor.phone || '',
           token: auth?.token || '',
           tokenExpiresIn: auth?.expiresIn || 0,
         });
-        if (!isSignup) {
-          toast.success('Welcome, Doctor!');
-        }
-      } else {
-        setAuthSession({
-          role,
-          email,
-          name: email.split('@')[0],
-        });
-      }
 
-      navigate(getDashboardPathForRole(role), { replace: true });
+        toast.success(t('auth.rolePage.doctorLoginSuccess'));
+        navigate(getDashboardPathForRole('doctor'), { replace: true });
+      }
     } catch (requestError) {
-      setError(requestError?.response?.data?.message || requestError?.message || t('auth.rolePage.authFailed'));
+      const message = requestError?.response?.data?.message || requestError?.message || t('auth.rolePage.authFailed');
+      setError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-[#050816] text-slate-100">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.34),transparent_32%),radial-gradient(circle_at_top_right,rgba(168,85,247,0.3),transparent_32%),radial-gradient(circle_at_bottom,rgba(20,184,166,0.18),transparent_28%),linear-gradient(135deg,#020617_0%,#08101f_46%,#120b25_100%)]" />
-      <div className="pointer-events-none absolute left-1/2 top-0 h-80 w-80 -translate-x-1/2 rounded-full bg-cyan-400/10 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-[#F5F9FF] text-[#0F2747] font-sans antialiased">
+      {/* Background Lighting */}
+      <div className="pointer-events-none absolute -left-40 -top-40 h-[500px] w-[500px] rounded-full bg-gradient-to-br from-emerald-100/40 via-teal-50/30 to-transparent blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-40 -right-40 h-[500px] w-[500px] rounded-full bg-gradient-to-tl from-sky-100/40 via-blue-50/30 to-transparent blur-3xl" />
+      <div className="pointer-events-none absolute inset-0 opacity-[0.03] [background-image:radial-gradient(#059669_1px,transparent_1px)] [background-size:24px_24px]" />
 
-      <div className="relative z-20 px-4 pt-4 sm:px-6 lg:px-8">
-        <Link to="/" className="dashboard-back-link" aria-label={t('auth.backToHome')}>
-          <ArrowLeft className="h-4 w-4" />
-          <span className="dashboard-back-label">{t('auth.backToHome')}</span>
+      {/* Top Header Navigation */}
+      <div className="relative z-20 px-4 pt-6 sm:px-8 max-w-[1440px] mx-auto flex items-center justify-between">
+        <Link
+          to={selectionPath}
+          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs sm:text-sm font-bold text-slate-700 shadow-2xs hover:bg-slate-50 transition"
+          aria-label="Back to role selection"
+        >
+          <ArrowLeft className="h-4 w-4 text-[#059669]" />
+          <span>Back to Role Selection</span>
         </Link>
+
+        <div className="flex items-center gap-2">
+          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#059669] text-white shadow-sm">
+            <Stethoscope className="h-4 w-4" />
+          </div>
+          <span className="font-sans text-sm font-bold text-[#0F2747] hidden sm:inline">
+            Smart Healthcare
+          </span>
+        </div>
       </div>
 
       <motion.div
-        className="relative mx-auto flex min-h-screen w-full max-w-6xl items-center px-4 py-10 sm:px-6 lg:px-8"
+        className="relative mx-auto flex min-h-[calc(100vh-80px)] w-full max-w-6xl items-center px-4 py-8 sm:px-6 lg:px-8"
         initial={{ opacity: 0, y: 14 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, ease: 'easeOut' }}
       >
-        <div className="grid w-full gap-8 lg:grid-cols-[1fr_1.1fr]">
+        <div className="grid w-full gap-8 lg:grid-cols-[1fr_1.1fr] items-center">
+          {/* Left Context Column */}
           <div className="flex flex-col justify-center gap-6">
-            <Link to={selectionPath} className="inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 backdrop-blur-xl transition hover:bg-white/10">
-              <ShieldCheck className="h-4 w-4 text-cyan-200" />
-              {t('auth.rolePage.secureAccess')}
+            <Link
+              to={selectionPath}
+              className="inline-flex w-fit items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3.5 py-1 text-xs font-bold text-[#059669] transition hover:bg-emerald-100/70"
+            >
+              <ShieldCheck className="h-4 w-4" />
+              <span>{t('auth.rolePage.secureAccess')}</span>
             </Link>
 
-            <div className="space-y-4">
-              <p className={`text-sm font-semibold uppercase tracking-[0.35em] ${accent}`}>{roleLabel} {isSignup ? t('auth.signUp') : t('auth.login')}</p>
-              <h1 className="max-w-xl font-display text-4xl font-bold leading-tight text-white md:text-6xl">{title}</h1>
-              <p className="max-w-xl text-base leading-8 text-slate-300 md:text-lg">{subtitle}</p>
+            <div className="space-y-2.5">
+              <p className="text-xs font-bold uppercase tracking-[0.25em] text-[#059669]">
+                {roleLabel} {isSignup ? t('auth.signUp') : t('auth.login')}
+              </p>
+              <h1 className="max-w-xl font-sans text-3xl sm:text-4xl lg:text-5xl font-extrabold leading-tight text-[#0F2747]">
+                {title}
+              </h1>
+              <p className="max-w-xl text-sm sm:text-base leading-relaxed text-slate-600">
+                {subtitle}
+              </p>
             </div>
 
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid gap-3.5 sm:grid-cols-2">
               {rolePillars.map((item) => (
-                <div key={item} className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4 text-sm leading-6 text-slate-200 backdrop-blur-xl">
-                  {item}
+                <div
+                  key={item}
+                  className="rounded-2xl border border-slate-200/90 bg-white/90 p-4 text-xs sm:text-sm font-semibold leading-relaxed text-slate-700 shadow-2xs"
+                >
+                  ✓ {item}
                 </div>
               ))}
             </div>
 
             <div className="grid gap-3 sm:grid-cols-3">
               {trustStats.map((stat) => (
-                <div key={stat.label} className="rounded-2xl border border-white/10 bg-slate-950/40 px-4 py-4 backdrop-blur-xl">
-                  <p className="text-[10px] uppercase tracking-[0.24em] text-slate-400">{stat.label}</p>
-                  <p className="mt-2 text-sm font-semibold text-slate-100">{stat.value}</p>
+                <div key={stat.label} className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{stat.label}</p>
+                  <p className="mt-1 text-xs font-bold text-[#0F2747]">{stat.value}</p>
                 </div>
               ))}
             </div>
           </div>
 
+          {/* Right Form Card */}
           <motion.div
-            className="relative rounded-[2rem] border border-white/12 bg-white/8 p-5 shadow-[0_30px_120px_rgba(2,6,23,0.52)] backdrop-blur-2xl sm:p-7"
+            className="relative rounded-3xl sm:rounded-[2.25rem] border border-slate-200/90 bg-white p-6 sm:p-10 shadow-[0_20px_60px_-15px_rgba(16,42,86,0.08)]"
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.45, delay: 0.05 }}
           >
-            <div className="absolute inset-0 rounded-[2rem] bg-[radial-gradient(circle_at_top,rgba(34,211,238,0.12),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(168,85,247,0.12),transparent_32%)]" />
-
-            <div className="relative">
-              <div className="mb-6 inline-flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200">
-                <HeartPulse className="h-4 w-4 text-cyan-200" />
-                {helperCopy}
+            <div>
+              <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-[#059669]">
+                <HeartPulse className="h-4 w-4" />
+                <span>{helperCopy}</span>
               </div>
 
               <form className="space-y-4" onSubmit={handleSubmit}>
@@ -222,39 +240,34 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
                 ) : null}
 
                 {error ? (
-                  <div className="rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-100">
+                  <div className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-semibold text-rose-700">
                     {error}
                   </div>
                 ) : null}
 
-                <Button type="submit" size="lg" className="w-full justify-center rounded-2xl" disabled={loading}>
-                  {loading ? (
-                    <>
-                      <LoaderCircle className="h-4 w-4 animate-spin" />
-                      {isSignup ? t('auth.rolePage.createAccountProgress') : t('auth.rolePage.signingInProgress')}
-                    </>
-                  ) : (
-                    <>
-                      {ctaLabel}
-                      <ArrowRight className="h-4 w-4" />
-                    </>
-                  )}
+                <Button
+                  type="submit"
+                  size="lg"
+                  className="w-full justify-center bg-[#059669] hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-md shadow-emerald-500/25 py-3"
+                  disabled={loading}
+                >
+                  {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                  {loading ? t('auth.rolePage.authorizing') : ctaLabel}
                 </Button>
-
-                <p className="text-center text-sm leading-6 text-slate-300">
-                  {t('auth.rolePage.continueToDashboard', { role: roleLabel.toLowerCase() })}
-                </p>
-
-                <p className="text-center text-sm leading-6 text-slate-300">
-                  {isSignup ? t('auth.rolePage.alreadyHaveAccount') : t('auth.rolePage.needNewAccount')}{' '}
-                  <Link to={alternatePath} className="font-semibold text-cyan-200 transition hover:text-cyan-100">
-                    {isSignup ? t('auth.login') : t('auth.signUp')}
-                  </Link>
-                </p>
-
               </form>
 
-              {role === 'doctor' && !isSignup ? <OtpPasswordReset role="doctor" defaultPhone={phone} /> : null}
+              <p className="mt-5 text-center text-xs text-slate-500">
+                {isSignup ? t('auth.rolePage.alreadyAccount') : t('auth.rolePage.needAccount')}{' '}
+                <Link to={alternatePath} className="font-bold text-[#059669] hover:text-emerald-800">
+                  {isSignup ? t('auth.rolePage.loginHere') : t('auth.rolePage.signupHere')}
+                </Link>
+              </p>
+
+              {!isSignup && isDoctor ? (
+                <div className="mt-6 pt-4 border-t border-slate-100">
+                  <OtpPasswordReset role="doctor" />
+                </div>
+              ) : null}
             </div>
           </motion.div>
         </div>
@@ -263,15 +276,18 @@ export function RoleLoginPage({ role, mode = 'login', title, subtitle, accent, c
   );
 }
 
-function Field({ label, icon, ...props }) {
+function Field({ label, icon, type = 'text', ...props }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-slate-200">{label}</span>
-      <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/45 px-4 py-3 backdrop-blur-xl transition focus-within:border-cyan-300/40 focus-within:ring-1 focus-within:ring-cyan-300/30">
-        <span className="text-slate-400">{icon}</span>
+    <label className="block space-y-1.5 text-left">
+      <span className="text-xs font-bold text-slate-700">{label}</span>
+      <div className="relative">
+        <span className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+          {icon}
+        </span>
         <input
-          className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500"
+          type={type}
           {...props}
+          className="w-full rounded-xl border border-slate-200 bg-slate-50/50 pl-10 pr-3.5 py-2.5 text-sm text-[#0F2747] placeholder:text-slate-400 outline-none transition focus:border-[#059669] focus:bg-white focus:ring-2 focus:ring-emerald-100"
         />
       </div>
     </label>

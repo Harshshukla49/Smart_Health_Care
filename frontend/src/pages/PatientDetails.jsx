@@ -35,6 +35,21 @@ export function PatientDetails() {
   const { patientId } = useParams();
   const session = getAuthSession();
   const isDoctor = session?.role === 'doctor';
+  const isPatient = session?.role === 'patient';
+  const selfPatientId = String(session?.patientId || '').trim();
+  const requestedId = String(patientId || '').trim();
+
+  // Scoped Security Guard: A patient can ONLY view their own records
+  if (isPatient && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase()) {
+    return (
+      <div className="p-6">
+        <ErrorState
+          title="Access Restricted"
+          message="Patient accounts are strictly scoped to their own personal health records. You cannot view telemetry for other patients."
+        />
+      </div>
+    );
+  }
 
   const [patient, setPatient] = useState(null);
   const [audit, setAudit] = useState([]);

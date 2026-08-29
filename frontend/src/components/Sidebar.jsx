@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Link, NavLink } from 'react-router-dom';
-import { HeartPulse, X } from 'lucide-react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { HeartPulse, LogOut, X } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { navigationLinks } from '../data/demoData';
 import { LanguageSwitcher } from './LanguageSwitcher';
 import { useI18n } from '../context/I18nContext';
+import { clearAuthSession, getAuthSession } from '../utils/auth';
 
 const panelVariants = {
   hidden: { x: '-100%' },
@@ -14,6 +16,14 @@ const panelVariants = {
 
 export function Sidebar({ open, onClose }) {
   const { t } = useI18n();
+  const navigate = useNavigate();
+  const session = getAuthSession();
+
+  const handleLogout = () => {
+    clearAuthSession();
+    toast.success('Logged out successfully');
+    navigate('/login', { replace: true });
+  };
 
   const labelByPath = {
     '/': t('public.nav.home'),
@@ -21,6 +31,7 @@ export function Sidebar({ open, onClose }) {
     '/blog': t('public.nav.blog'),
     '/contact': t('public.nav.contact'),
   };
+
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : '';
@@ -47,7 +58,7 @@ export function Sidebar({ open, onClose }) {
           <motion.button
             type="button"
             aria-label={t('public.closeSidebar')}
-            className="fixed inset-0 z-[60] bg-slate-950/70 backdrop-blur-sm lg:hidden"
+            className="fixed inset-0 z-[60] bg-slate-900/40 backdrop-blur-xs lg:hidden"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -56,7 +67,7 @@ export function Sidebar({ open, onClose }) {
           />
 
           <motion.aside
-            className="fixed inset-y-0 left-0 z-[70] w-[84%] max-w-sm border-r border-white/10 bg-slate-950/95 px-5 py-5 shadow-glass backdrop-blur-2xl lg:hidden"
+            className="fixed inset-y-0 left-0 z-[70] w-[84%] max-w-sm border-r border-slate-200 bg-white px-5 py-5 shadow-2xl lg:hidden"
             variants={panelVariants}
             initial="hidden"
             animate="visible"
@@ -66,16 +77,16 @@ export function Sidebar({ open, onClose }) {
           >
             <div className="flex items-center justify-between">
               <Link to="/" className="flex items-center gap-3" onClick={onClose}>
-                <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-400 via-sky-500 to-fuchsia-500 text-slate-950 shadow-glow">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-sky-500 to-blue-600 text-white shadow-sm shadow-sky-500/25">
                   <HeartPulse className="h-5 w-5" />
                 </span>
-                <span className="font-display text-lg font-bold text-white">{t('common.smartHealth')}</span>
+                <span className="font-heading text-lg font-bold text-slate-900">{t('common.smartHealth')}</span>
               </Link>
 
               <button
                 type="button"
                 onClick={onClose}
-                className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white transition hover:bg-white/10"
+                className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100"
                 aria-label={t('public.closeMenu')}
               >
                 <X className="h-5 w-5" />
@@ -86,15 +97,15 @@ export function Sidebar({ open, onClose }) {
               <LanguageSwitcher />
             </div>
 
-            <div className="mt-8 flex flex-col gap-2">
+            <div className="mt-6 flex flex-col gap-1.5">
               {navigationLinks.map((link) => (
                 <NavLink
                   key={link.path}
                   to={link.path}
                   className={({ isActive }) =>
                     [
-                      'rounded-2xl px-4 py-3 text-base font-semibold transition',
-                      isActive ? 'bg-white/12 text-white' : 'text-slate-300 hover:bg-white/8 hover:text-white',
+                      'rounded-xl px-4 py-2.5 text-sm font-semibold transition',
+                      isActive ? 'bg-sky-50 text-sky-700 font-bold border border-sky-200/80 shadow-2xs' : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
                     ].join(' ')
                   }
                   onClick={onClose}
@@ -102,16 +113,40 @@ export function Sidebar({ open, onClose }) {
                   {labelByPath[link.path] || link.label}
                 </NavLink>
               ))}
-              <NavLink
-                to="/login"
-                className="mt-3 rounded-2xl bg-gradient-to-r from-cyan-400 via-sky-500 to-fuchsia-500 px-4 py-3 text-base font-bold text-slate-950 shadow-glow"
-                onClick={onClose}
-              >
-                {t('public.login')}
-              </NavLink>
+              {session ? (
+                <>
+                  <NavLink
+                    to="/dashboard"
+                    className="mt-3 flex items-center justify-center gap-2 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-sky-600/20 hover:bg-sky-700 transition"
+                    onClick={onClose}
+                  >
+                    <HeartPulse className="h-4 w-4" />
+                    <span>Dashboard</span>
+                  </NavLink>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      handleLogout();
+                    }}
+                    className="mt-2 flex items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+                  >
+                    <LogOut className="h-4 w-4 text-rose-600" />
+                    <span>Logout</span>
+                  </button>
+                </>
+              ) : (
+                <NavLink
+                  to="/login"
+                  className="mt-3 rounded-xl bg-sky-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm shadow-sky-600/20 hover:bg-sky-700 transition text-center"
+                  onClick={onClose}
+                >
+                  {t('public.login')}
+                </NavLink>
+              )}
             </div>
 
-            <div className="mt-8 rounded-3xl border border-white/10 bg-white/5 p-4 text-sm leading-7 text-slate-300">
+            <div className="mt-6 rounded-2xl border border-slate-200/80 bg-slate-50/70 p-4 text-xs leading-relaxed text-slate-500">
               {t('public.sidebarBlurb')}
             </div>
           </motion.aside>

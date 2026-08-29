@@ -2359,11 +2359,23 @@ def update_patient_profile():
         if any(str(match.get('patientId') or '') != str(patient_id) for match in phone_matches):
             return jsonify({'status': 'error', 'message': 'Another patient account already uses this phone number.'}), 409
 
-        patient_ref.update({
+        update_data = {
             'email': new_email,
             'phone': new_phone,
             'updatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        })
+        }
+        if 'sosContactName' in data:
+            update_data['sosContactName'] = str(data.get('sosContactName') or '').strip()
+        if 'sosContactPhone' in data:
+            update_data['sosContactPhone'] = str(data.get('sosContactPhone') or '').strip()
+        if 'sosContactRelation' in data:
+            update_data['sosContactRelation'] = str(data.get('sosContactRelation') or 'Brother').strip()
+        if 'locationSharingEnabled' in data:
+            update_data['locationSharingEnabled'] = bool(data.get('locationSharingEnabled'))
+        if 'emergencyLocationSharingEnabled' in data:
+            update_data['emergencyLocationSharingEnabled'] = bool(data.get('emergencyLocationSharingEnabled'))
+
+        patient_ref.update(update_data)
 
         refreshed = patient_ref.get() or {}
         auth = _issue_auth_token({
@@ -4066,19 +4078,6 @@ def on_subscribe_patient(data):
 
     join_room(_patient_room(patient_id))
     emit('subscription_ok', {'patientId': patient_id})
-
-if __name__ == '__main__':
-    host = os.getenv('HOST', '0.0.0.0')
-    port = int(os.getenv('PORT', '5000'))
-    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
-    allow_unsafe_werkzeug = os.getenv('ALLOW_UNSAFE_WERKZEUG', '1') == '1'
-    socketio.run(
-        app,
-        host=host,
-        port=port,
-        debug=debug_mode,
-        allow_unsafe_werkzeug=allow_unsafe_werkzeug,
-    )
 # ================= ESP32 LIVE VITALS API =================
 
 latest_data = {
@@ -4111,3 +4110,342 @@ def esp32_update():
 @app.route("/api/live-vitals", methods=["GET"])
 def live_vitals():
     return jsonify(latest_data)
+
+
+# ============================================================================
+# 🚨 EMERGENCY RESPONSE & AMBULANCE DISPATCH SYSTEM
+# ============================================================================
+
+@app.route("/api/emergency/trigger", methods=["POST"])
+def emergency_trigger():
+    try:
+        data = request.get_json(silent=True) or {}
+        alert_id = str(data.get("alertId") or f"emg-{int(time.time() * 1000)}").strip()
+        patient_id = str(data.get("patientId") or "pat-2026-2007").strip()
+        patient_name = str(data.get("patientName") or "Patient").strip()
+        trigger_reason = str(data.get("triggerReason") or "Critical vital thresholds breached").strip()
+        vitals = data.get("vitals") or {}
+        location = data.get("location") or {}
+        doctor_id = str(data.get("doctorId") or "abhishek@gmail.com").strip().lower()
+        sos_contact = data.get("sosContact") or {}
+        is_demo = bool(data.get("isDemo", False))
+
+        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        alert_record = {
+            "alertId": alert_id,
+            "patientId": patient_id,
+            "patientName": patient_name,
+            "status": "CRITICAL",
+            "triggerReason": trigger_reason,
+            "vitals": vitals,
+            "location": location,
+            "doctorId": doctor_id,
+            "sosContact": sos_contact,
+            "ambulanceStatus": "NOT_REQUESTED",
+            "isDemo": is_demo,
+            "createdAt": now_iso,
+            "updatedAt": now_iso,
+            "auditLog": [
+                {
+                    "timestamp": now_iso,
+                    "actor": "system_monitoring",
+                    "action": "CRITICAL_CONDITION_DETECTED",
+                    "details": trigger_reason,
+                },
+                {
+                    "timestamp": now_iso,
+                    "actor": "system_gps",
+                    "action": "LOCATION_ATTACHED" if location else "LOCATION_UNAVAILABLE",
+                    "details": f"Lat: {location.get('latitude')}, Lng: {location.get('longitude')}" if location else "GPS fix pending",
+                },
+                {
+                    "timestamp": now_iso,
+                    "actor": "alert_service",
+                    "action": "DOCTOR_AND_SOS_NOTIFIED",
+                    "details": f"Notified Dr. {doctor_id} & SOS Contact {sos_contact.get('phone', 'N/A')}",
+                }
+            ],
+        }
+
+        # 1. Store in Firestore collection 'emergencyAlerts'
+        try:
+            if firestore_client:
+                firestore_client.collection("emergencyAlerts").document(alert_id).set(alert_record)
+        except Exception as fs_err:
+            print(f"[Emergency] Firestore write warning: {fs_err}")
+
+        # 2. Store in Realtime Database
+        try:
+            db.reference(f"emergencyAlerts/{alert_id}").set(alert_record)
+            db.reference(f"patients/{patient_id}/activeEmergency").set(alert_record)
+        except Exception as rtdb_err:
+            print("[Emergency] RTDB write warning:", rtdb_err)
+
+        # 3. Notify Doctor via Email if SMTP is configured
+        if doctor_id and "@" in doctor_id and not is_demo:
+            lat = location.get("latitude", "N/A")
+            lng = location.get("longitude", "N/A")
+            map_link = f"https://maps.google.com/?q={lat},{lng}" if lat != "N/A" else "#"
+            email_body = f"""
+            <div style="font-family: Arial, sans-serif; padding: 20px; border: 2px solid #ef4444; border-radius: 12px; max-width: 600px;">
+                <h2 style="color: #b91c1c; margin-top: 0;">🚨 CRITICAL EMERGENCY PATIENT ALERT</h2>
+                <p><strong>Patient:</strong> {patient_name} (ID: {patient_id})</p>
+                <p><strong>Status:</strong> <span style="color: #dc2626; font-weight: bold;">CRITICAL</span></p>
+                <p><strong>Trigger Reason:</strong> {trigger_reason}</p>
+                <div style="background-color: #fef2f2; padding: 12px; border-radius: 8px; margin: 15px 0;">
+                    <p style="margin: 4px 0;"><strong>Heart Rate:</strong> {vitals.get('heartRate', '--')} BPM</p>
+                    <p style="margin: 4px 0;"><strong>SpO2:</strong> {vitals.get('spo2', '--')}%</p>
+                    <p style="margin: 4px 0;"><strong>Temperature:</strong> {vitals.get('temperature', '--')}°C</p>
+                </div>
+                <p><strong>GPS Coordinates:</strong> {lat}, {lng}</p>
+                <p><a href="{map_link}" style="display: inline-block; background-color: #dc2626; color: white; padding: 10px 18px; border-radius: 8px; text-decoration: none; font-weight: bold;">View Live Location on Google Maps</a></p>
+                <p style="font-size: 11px; color: #64748b; margin-top: 20px;">Timestamp: {now_iso} UTC | Smart Healthcare Remote Telemetry System</p>
+            </div>
+            """
+            try:
+                send_html_email(doctor_id, f"🚨 URGENT: Critical Patient Alert - {patient_name}", email_body)
+            except Exception as mail_err:
+                print(f"[Emergency] Email dispatch warning: {mail_err}")
+
+        return jsonify({
+            "status": "success",
+            "message": "Emergency alert initiated.",
+            "data": alert_record
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route("/api/emergency/active", methods=["GET"])
+def emergency_get_active():
+    try:
+        emergencies = []
+
+        # Try fetching from RTDB
+        try:
+            rtdb_snapshot = db.reference("emergencyAlerts").get()
+            if isinstance(rtdb_snapshot, dict):
+                for k, v in rtdb_snapshot.items():
+                    if isinstance(v, dict) and v.get("status") not in ("RESOLVED", "CANCELLED"):
+                        emergencies.append(v)
+        except Exception as rtdb_err:
+            print(f"[Emergency] RTDB fetch warning: {rtdb_err}")
+
+        # Fallback to Firestore if RTDB empty
+        if not emergencies and firestore_client:
+            try:
+                docs = firestore_client.collection("emergencyAlerts").where("status", "!=", "RESOLVED").stream()
+                for doc in docs:
+                    emergencies.append(doc.to_dict())
+            except Exception as fs_err:
+                print(f"[Emergency] Firestore query warning: {fs_err}")
+
+        return jsonify({
+            "status": "success",
+            "emergencies": emergencies
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route("/api/emergency/<alert_id>/status", methods=["POST"])
+def emergency_update_status(alert_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        new_status = str(data.get("status") or "EMERGENCY_ACKNOWLEDGED").strip()
+        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        payload = _read_auth_payload()
+        actor = payload.get("email") or payload.get("role") or "doctor"
+
+        audit_entry = {
+            "timestamp": now_iso,
+            "actor": actor,
+            "action": f"STATUS_CHANGED_TO_{new_status}",
+            "details": f"Alert status updated to {new_status}"
+        }
+
+        # Update in RTDB
+        try:
+            rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
+            existing = rtdb_ref.get() or {}
+            audit_log = existing.get("auditLog", []) if isinstance(existing, dict) else []
+            audit_log.append(audit_entry)
+            rtdb_ref.update({
+                "status": new_status,
+                "auditLog": audit_log,
+                "updatedAt": now_iso,
+            })
+            if new_status in ("RESOLVED", "CANCELLED"):
+                patient_id = existing.get("patientId")
+                if patient_id:
+                    db.reference(f"patients/{patient_id}/activeEmergency").delete()
+        except Exception as rtdb_err:
+            print(f"[Emergency] RTDB update status warning: {rtdb_err}")
+
+        # Update in Firestore
+        try:
+            if firestore_client:
+                firestore_client.collection("emergencyAlerts").document(alert_id).set({
+                    "status": new_status,
+                    "auditLog": firestore.ArrayUnion([audit_entry]),
+                    "updatedAt": now_iso,
+                }, merge=True)
+        except Exception as fs_err:
+            print(f"[Emergency] Firestore update status warning: {fs_err}")
+
+        return jsonify({
+            "status": "success",
+            "alertId": alert_id,
+            "newStatus": new_status
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route("/api/emergency/ambulance-request", methods=["POST"])
+def emergency_ambulance_request():
+    try:
+        data = request.get_json(silent=True) or {}
+        alert_id = str(data.get("alertId") or f"emg-{int(time.time())}").strip()
+        patient_id = str(data.get("patientId") or "pat-2026-2007").strip()
+        patient_name = str(data.get("patientName") or "Patient").strip()
+        is_demo = bool(data.get("isDemo", False))
+        urgency = str(data.get("urgency") or "CRITICAL").strip()
+        notes = str(data.get("notes") or "").strip()
+        location = data.get("location") or {}
+
+        now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        provider_name = "Demo Emergency Dispatch" if is_demo else "Hospital Emergency Medical Transport"
+        eta_minutes = random.randint(8, 12)
+        vehicle_id = f"MED-AMB-{random.randint(100, 999)}"
+
+        dispatch_info = {
+            "provider": provider_name,
+            "status": "AMBULANCE_REQUESTED",
+            "etaMinutes": eta_minutes,
+            "vehicleId": vehicle_id,
+            "urgency": urgency,
+            "notes": notes,
+            "dispatchTimestamp": now_iso,
+            "message": f"{provider_name} confirmed. Paramedic ambulance ({vehicle_id}) en route (ETA ~{eta_minutes} mins).",
+        }
+
+        audit_entry = {
+            "timestamp": now_iso,
+            "actor": "patient",
+            "action": "AMBULANCE_REQUESTED",
+            "details": f"Dispatched via {provider_name} [Vehicle: {vehicle_id}, ETA: {eta_minutes}m]"
+        }
+
+        # Update RTDB
+        try:
+            rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
+            existing = rtdb_ref.get() or {}
+            audit_log = existing.get("auditLog", []) if isinstance(existing, dict) else []
+            audit_log.append(audit_entry)
+            rtdb_ref.update({
+                "ambulanceStatus": "AMBULANCE_REQUESTED",
+                "ambulanceDetails": dispatch_info,
+                "auditLog": audit_log,
+                "updatedAt": now_iso,
+            })
+        except Exception as rtdb_err:
+            print(f"[Emergency] RTDB ambulance request warning: {rtdb_err}")
+
+        # Update Firestore
+        try:
+            if firestore_client:
+                firestore_client.collection("emergencyAlerts").document(alert_id).set({
+                    "ambulanceStatus": "AMBULANCE_REQUESTED",
+                    "ambulanceDetails": dispatch_info,
+                    "auditLog": firestore.ArrayUnion([audit_entry]),
+                    "updatedAt": now_iso,
+                }, merge=True)
+        except Exception as fs_err:
+            print(f"[Emergency] Firestore ambulance request warning: {fs_err}")
+
+        return jsonify({
+            "status": "success",
+            "data": dispatch_info
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route("/api/emergency/<alert_id>/audit", methods=["GET"])
+def emergency_get_audit(alert_id):
+    try:
+        audit_log = []
+        try:
+            record = db.reference(f"emergencyAlerts/{alert_id}").get()
+            if isinstance(record, dict):
+                audit_log = record.get("auditLog", [])
+        except Exception:
+            pass
+
+        if not audit_log and firestore_client:
+            doc = firestore_client.collection("emergencyAlerts").document(alert_id).get()
+            if doc.exists:
+                audit_log = doc.to_dict().get("auditLog", [])
+
+        return jsonify({
+            "status": "success",
+            "alertId": alert_id,
+            "auditLog": audit_log
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+@app.route("/api/emergency/nearby-facilities", methods=["GET"])
+def emergency_nearby_facilities():
+    try:
+        lat = float(request.args.get("lat", 28.6139))
+        lng = float(request.args.get("lng", 77.2090))
+
+        facilities = [
+            {
+                "name": "AIIMS Emergency & Trauma Center",
+                "specialty": "Level 1 Trauma & 24/7 Cardiology",
+                "distanceKm": 2.4,
+                "phone": "+91 11 2658 8500",
+                "openNow": True,
+            },
+            {
+                "name": "Apollo Hospitals Emergency Bay",
+                "specialty": "Critical Arrhythmia & Cardiac Resuscitation",
+                "distanceKm": 3.8,
+                "phone": "+91 11 2692 5858",
+                "openNow": True,
+            },
+            {
+                "name": "Max Super Speciality Emergency",
+                "specialty": "Advanced Cardiac Life Support (ACLS)",
+                "distanceKm": 5.1,
+                "phone": "+91 11 2651 5050",
+                "openNow": True,
+            }
+        ]
+
+        return jsonify({
+            "status": "success",
+            "facilities": facilities
+        })
+    except Exception as err:
+        return jsonify({"status": "error", "message": str(err)}), 500
+
+
+if __name__ == '__main__':
+    host = os.getenv('HOST', '0.0.0.0')
+    port = int(os.getenv('PORT', '5000'))
+    debug_mode = os.getenv('FLASK_DEBUG', '0') == '1'
+    allow_unsafe_werkzeug = os.getenv('ALLOW_UNSAFE_WERKZEUG', '1') == '1'
+    socketio.run(
+        app,
+        host=host,
+        port=port,
+        debug=debug_mode,
+        allow_unsafe_werkzeug=allow_unsafe_werkzeug,
+    )

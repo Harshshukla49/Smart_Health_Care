@@ -8,6 +8,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { getPatients, getChatMessages, getChatThreadContext, markChatMessageRead, sendChatMessage } from '../services/api';
 import { getAuthSession } from '../utils/auth';
+import { useVideoCall } from '../context/VideoCallContext';
 
 const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
 const PRESENCE_PING_MS = 20000;
@@ -78,6 +79,7 @@ const getLatestText = (rows) => {
 export function Chat() {
   const session = getAuthSession();
   const role = session?.role === 'doctor' ? 'doctor' : 'patient';
+  const { openDialer } = useVideoCall();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedPatientId = searchParams.get('patientId') || '';
   const [doctorPatients, setDoctorPatients] = useState([]);
@@ -914,12 +916,12 @@ export function Chat() {
                 ) : (
                   <button
                     type="button"
-                    onClick={startOutgoingCall}
-                    disabled={!socketReady || !contextData?.threadId || outgoingCall || Boolean(incomingCall)}
-                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/15 text-cyan-100 transition hover:bg-cyan-400/25 disabled:cursor-not-allowed disabled:opacity-55"
+                    onClick={() => openDialer()}
+                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/15 text-cyan-100 transition hover:bg-cyan-400/25"
                     aria-label="Start video call"
+                    title="Telehealth Video Consultation"
                   >
-                    <Phone className="h-4 w-4" />
+                    <Video className="h-4 w-4" />
                   </button>
                 )}
               </div>

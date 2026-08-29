@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Link } from 'react-router-dom';
 import {
   CheckCircle2,
+  KeyRound,
   LoaderCircle,
   Lock,
   Phone,
@@ -19,9 +20,9 @@ import { clearPhoneOtpSession, sendOTP, verifyOTP } from '../services/phoneAuth'
 const DEFAULT_RESEND_SECONDS = 30;
 
 const fadeVariants = {
-  hidden: { opacity: 0, y: 14 },
+  hidden: { opacity: 0, y: 10 },
   visible: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -10 },
+  exit: { opacity: 0, y: -8 },
 };
 
 export function OtpPasswordReset({ role, defaultPhone = '' }) {
@@ -58,65 +59,35 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
   };
 
   useEffect(() => {
-    setPhone(defaultPhone || '');
-  }, [defaultPhone]);
-
-  useEffect(() => {
-    if (resendIn <= 0) {
-      return undefined;
-    }
-
-    const timer = window.setInterval(() => {
-      setResendIn((current) => (current <= 1 ? 0 : current - 1));
+    if (resendIn <= 0) return undefined;
+    const timer = setInterval(() => {
+      setResendIn((prev) => (prev > 0 ? prev - 1 : 0));
     }, 1000);
-
-    return () => window.clearInterval(timer);
+    return () => clearInterval(timer);
   }, [resendIn]);
 
-  useEffect(() => {
-    if (!showToast) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => setShowToast(false), 2400);
-    return () => window.clearTimeout(timer);
-  }, [showToast]);
-
-  const validatePhone = () => {
-    const normalized = String(phone || '').replace(/[^\d]/g, '');
-    if (normalized.length < 8) {
-      setError('Enter a valid registered phone number.');
-      return false;
-    }
-    return true;
-  };
-
   const handleSendOtp = async () => {
-    if (!validatePhone()) {
+    const trimmed = String(phone || '').trim();
+    if (!trimmed) {
+      setError('Please enter your registered phone number with country code (e.g. +91XXXXXXXXXX).');
       return;
     }
 
     setError('');
     setInfo('');
     setLoadingAction('send');
-    setFirebaseIdToken('');
 
     try {
-      const response = await sendOTP({
-        phoneNumber: phone.trim(),
-        role,
-      });
-
+      await sendOTP(trimmed);
+      setMaskedPhone(trimmed.replace(/^(\+?\d{2,3})(\d+)(\d{4})$/, '$1******$3'));
       setStep(2);
-      setOtp('');
       setResendIn(DEFAULT_RESEND_SECONDS);
-      setMaskedPhone(response?.maskedPhone || '');
-      setInfo(`OTP sent to ${response?.maskedPhone || 'your registered phone'}.`);
+      setInfo('Verification code sent via SMS.');
     } catch (requestError) {
       setError(
-        requestError?.response?.data?.message
-        || requestError?.message
-        || 'Unable to send OTP at the moment.'
+        requestError?.response?.data?.message ||
+        requestError?.message ||
+        'Failed to dispatch SMS verification code.'
       );
     } finally {
       setLoadingAction('');
@@ -124,12 +95,8 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
   };
 
   const handleVerifyOtp = async () => {
-    if (!validatePhone()) {
-      return;
-    }
-
-    if (otp.trim().length !== 6) {
-      setError('Enter the 6-digit OTP sent to your phone.');
+    if (!otp || otp.length < 6) {
+      setError('Enter the complete 6-digit verification code.');
       return;
     }
 
@@ -138,23 +105,29 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
     setLoadingAction('verify');
 
     try {
-      const verified = await verifyOTP({
-        otpCode: otp.trim(),
-      });
+      const userCredential = await verifyOTP(otp);
+      const user = userCredential?.user;
+      if (!user) throw new Error('Firebase phone verification failed.');
 
-      const verifyResponse = await verifyFirebasePhoneToken({
-        idToken: verified.idToken,
+      const token = await user.getIdToken();
+      setFirebaseIdToken(token);
+
+      const verificationResult = await verifyFirebasePhoneToken({
+        idToken: token,
         role,
       });
 
-      setFirebaseIdToken(verified.idToken);
+      if (!verificationResult?.verified) {
+        throw new Error(verificationResult?.message || 'Phone number does not match registered records.');
+      }
+
       setStep(3);
-      setInfo(`Phone verified for ${verifyResponse?.user?.role || role}. Create your new password now.`);
+      setInfo('Code verified. Set your new password.');
     } catch (requestError) {
       setError(
-        requestError?.response?.data?.message
-        || requestError?.message
-        || 'Invalid OTP. Please try again.'
+        requestError?.response?.data?.message ||
+        requestError?.message ||
+        'Verification code incorrect or expired.'
       );
     } finally {
       setLoadingAction('');
@@ -162,17 +135,12 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
   };
 
   const handleResetPassword = async () => {
-    if (!validatePhone()) {
+    if (!newPassword || newPassword.length < 6) {
+      setError('Password must be at least 6 characters.');
       return;
     }
-
     if (newPassword !== confirmPassword) {
-      setError('Password mismatch. Confirm password should match.');
-      return;
-    }
-
-    if (newPassword.length < 8) {
-      setError('Password must be at least 8 characters long.');
+      setError('Password confirmation does not match.');
       return;
     }
 
@@ -198,9 +166,9 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
       clearPhoneOtpSession();
     } catch (requestError) {
       setError(
-        requestError?.response?.data?.message
-        || requestError?.message
-        || 'Failed to update password.'
+        requestError?.response?.data?.message ||
+        requestError?.message ||
+        'Failed to update password.'
       );
     } finally {
       setLoadingAction('');
@@ -209,9 +177,9 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
 
   const renderStepTitle = () => {
     if (step === 1) return 'Step 1: Enter registered phone number';
-    if (step === 2) return 'Step 2: Verify OTP';
-    if (step === 3) return 'Step 3: Set new password';
-    return 'Step 4: Completed';
+    if (step === 2) return 'Step 2: Verify OTP code';
+    if (step === 3) return 'Step 3: Create new password';
+    return 'Step 4: Recovery Complete';
   };
 
   return (
@@ -229,221 +197,187 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
           setError('');
           setInfo('');
         }}
-        className="inline-flex w-full items-center justify-between rounded-2xl border border-cyan-300/20 bg-cyan-300/10 px-4 py-3 text-left text-sm font-semibold text-cyan-100 transition hover:bg-cyan-300/15"
+        className="inline-flex w-full items-center justify-between rounded-xl border border-sky-200 bg-sky-50/60 px-4 py-2.5 text-left text-xs sm:text-sm font-semibold text-[#1677FF] hover:bg-sky-100/60 transition"
       >
-        <span>{isOpen ? 'Hide password reset' : 'Forgot password? Reset with OTP'}</span>
-        <span className="text-xs tracking-[0.2em] text-cyan-200">OTP</span>
+        <span className="flex items-center gap-1.5">
+          <KeyRound className="h-3.5 w-3.5" />
+          <span>{isOpen ? 'Hide account recovery' : 'Forgot password? Reset with phone OTP'}</span>
+        </span>
+        <span className="rounded-md bg-white border border-sky-200 px-2 py-0.5 text-[10px] font-bold text-[#1677FF]">
+          OTP RECOVERY
+        </span>
       </button>
 
       <AnimatePresence initial={false}>
         {isOpen ? (
           <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.22 }}
-            className="mt-3 rounded-3xl border border-white/10 bg-white/5 p-4 shadow-[0_12px_50px_rgba(6,15,36,0.32)] backdrop-blur-xl sm:p-5"
+            exit={{ opacity: 0, y: -6 }}
+            transition={{ duration: 0.2 }}
+            className="mt-3 rounded-2xl border border-slate-200 bg-slate-50/70 p-4 sm:p-5 shadow-xs text-left"
           >
-      <div className="mb-4 flex items-center justify-between gap-3">
-        <div>
-          <p className="text-xs uppercase tracking-[0.2em] text-cyan-200">Forgot Password</p>
-          <h3 className="mt-1 text-base font-semibold text-white">{roleLabel} account recovery</h3>
-          <p className="mt-1 text-xs text-slate-300">{renderStepTitle()}</p>
-        </div>
-        <div className="rounded-full border border-cyan-200/20 bg-cyan-300/10 px-3 py-1 text-xs font-semibold tracking-[0.2em] text-cyan-100">
-          OTP RESET
-        </div>
-      </div>
-
-      {info ? (
-        <motion.div
-          className="mb-4 rounded-2xl border border-cyan-400/20 bg-cyan-500/10 px-4 py-3 text-sm text-cyan-100"
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          {info}
-        </motion.div>
-      ) : null}
-
-      {error ? (
-        <motion.div
-          className="mb-4 rounded-2xl border border-rose-400/25 bg-rose-500/10 px-4 py-3 text-sm text-rose-100"
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-        >
-          {error}
-        </motion.div>
-      ) : null}
-
-      <AnimatePresence mode="wait">
-        {step === 1 ? (
-          <motion.div
-            key="step-1"
-            variants={fadeVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.25 }}
-            className="space-y-3"
-          >
-            <Field
-              label="Phone Number"
-              type="tel"
-              value={phone}
-              onChange={(event) => setPhone(event.target.value)}
-              placeholder="+91XXXXXXXXXX"
-              icon={<Phone className="h-4 w-4" />}
-              disabled={isLoading}
-            />
-            <ActionButton
-              onClick={handleSendOtp}
-              disabled={isLoading}
-              loading={loadingAction === 'send'}
-              label="Send OTP"
-            />
-          </motion.div>
-        ) : null}
-
-        {step === 2 ? (
-          <motion.div
-            key="step-2"
-            variants={fadeVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.25 }}
-            className="space-y-3"
-          >
-            <Field
-              label="One-Time Password"
-              value={otp}
-              onChange={(event) => setOtp(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
-              placeholder="Enter 6-digit OTP"
-              icon={<ShieldCheck className="h-4 w-4" />}
-              disabled={isLoading}
-            />
-
-            <div className="flex flex-wrap gap-3">
-              <ActionButton
-                onClick={handleVerifyOtp}
-                disabled={isLoading}
-                loading={loadingAction === 'verify'}
-                label="Verify OTP"
-              />
-              <ActionButton
-                onClick={handleSendOtp}
-                disabled={isLoading || resendIn > 0}
-                loading={loadingAction === 'send'}
-                label={resendIn > 0 ? `Resend OTP in ${String(resendIn).padStart(2, '0')}s` : 'Resend OTP'}
-                variant="secondary"
-              />
+            <div className="mb-4 flex items-center justify-between gap-3 border-b border-slate-200/80 pb-3">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-[#1677FF]">
+                  Account Recovery
+                </p>
+                <h3 className="font-sans text-sm font-bold text-[#0F2747]">
+                  {roleLabel} Password Reset
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">{renderStepTitle()}</p>
+              </div>
             </div>
 
-            {maskedPhone ? <p className="text-xs text-slate-300">Code sent to {maskedPhone}.</p> : null}
-          </motion.div>
-        ) : null}
+            {info ? (
+              <motion.div
+                className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-xs font-semibold text-emerald-800"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                {info}
+              </motion.div>
+            ) : null}
 
-        {step === 3 ? (
-          <motion.div
-            key="step-3"
-            variants={fadeVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.25 }}
-            className="space-y-3"
-          >
-            <Field
-              label="New Password"
-              type="password"
-              value={newPassword}
-              onChange={(event) => setNewPassword(event.target.value)}
-              placeholder="Create strong password"
-              icon={<Lock className="h-4 w-4" />}
-              disabled={isLoading}
-            />
-            <Field
-              label="Confirm Password"
-              type="password"
-              value={confirmPassword}
-              onChange={(event) => setConfirmPassword(event.target.value)}
-              placeholder="Confirm password"
-              icon={<ShieldCheck className="h-4 w-4" />}
-              disabled={isLoading}
-            />
+            {error ? (
+              <motion.div
+                className="mb-3 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2 text-xs font-semibold text-rose-700"
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+              >
+                {error}
+              </motion.div>
+            ) : null}
 
-            <p className="text-xs leading-6 text-slate-300">
-              Use at least 8 characters with uppercase, lowercase, number, and a special character.
-            </p>
-
-            <ActionButton
-              onClick={handleResetPassword}
-              disabled={isLoading || !firebaseIdToken}
-              loading={loadingAction === 'reset'}
-              label="Update Password"
-            />
-          </motion.div>
-        ) : null}
-
-        {step === 4 ? (
-          <motion.div
-            key="step-4"
-            variants={fadeVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.25 }}
-          >
-            <motion.div
-              className="rounded-2xl border border-emerald-400/35 bg-emerald-500/10 p-4 text-emerald-100"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ type: 'spring', stiffness: 220, damping: 18 }}
-            >
-              <div className="flex items-start gap-3">
-                <CheckCircle2 className="mt-0.5 h-5 w-5" />
-                <div>
-                  <p className="text-sm font-semibold">Password updated successfully</p>
-                  <p className="mt-1 text-xs text-emerald-100/80">You can now log in using your new password.</p>
-                </div>
-              </div>
-
-              <div className="mt-4 flex flex-wrap gap-3">
-                <Link
-                  to={role === 'doctor' ? '/login/doctor' : '/login/patient'}
-                  className="inline-flex items-center justify-center rounded-xl border border-emerald-300/45 bg-emerald-400/20 px-4 py-2 text-sm font-semibold text-emerald-100 transition hover:bg-emerald-400/30"
+            <AnimatePresence mode="wait">
+              {step === 1 ? (
+                <motion.div
+                  key="step-1"
+                  variants={fadeVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="space-y-3"
                 >
-                  Go to Login
-                </Link>
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetFlow();
-                  }}
-                  className="inline-flex items-center justify-center rounded-xl border border-white/15 bg-white/10 px-4 py-2 text-sm font-semibold text-slate-100 transition hover:bg-white/20"
-                >
-                  Reset Again
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+                  <Field
+                    label="Registered Phone Number"
+                    type="tel"
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
+                    placeholder="+91XXXXXXXXXX"
+                    icon={<Phone className="h-4 w-4" />}
+                    disabled={isLoading}
+                  />
+                  <ActionButton
+                    onClick={handleSendOtp}
+                    disabled={isLoading}
+                    loading={loadingAction === 'send'}
+                    label="Send SMS Code"
+                  />
+                </motion.div>
+              ) : null}
 
-      <AnimatePresence>
-        {showToast ? (
-          <motion.div
-            className="pointer-events-none fixed bottom-6 right-6 z-50 flex items-center gap-2 rounded-2xl border border-emerald-400/30 bg-emerald-500/15 px-4 py-3 text-sm font-semibold text-emerald-100 shadow-[0_14px_50px_rgba(16,185,129,0.28)] backdrop-blur-xl"
-            initial={{ opacity: 0, y: 10, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.96 }}
-            transition={{ duration: 0.2 }}
-          >
-            <ShieldCheck className="h-4 w-4" />
-            Password updated successfully
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+              {step === 2 ? (
+                <motion.div
+                  key="step-2"
+                  variants={fadeVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="space-y-3"
+                >
+                  <Field
+                    label="6-Digit SMS Verification Code"
+                    value={otp}
+                    onChange={(event) => setOtp(event.target.value.replace(/[^\d]/g, '').slice(0, 6))}
+                    placeholder="Enter 6-digit code"
+                    icon={<ShieldCheck className="h-4 w-4" />}
+                    disabled={isLoading}
+                  />
+
+                  <div className="flex flex-wrap gap-2.5">
+                    <ActionButton
+                      onClick={handleVerifyOtp}
+                      disabled={isLoading}
+                      loading={loadingAction === 'verify'}
+                      label="Verify Code"
+                    />
+                    <ActionButton
+                      onClick={handleSendOtp}
+                      disabled={isLoading || resendIn > 0}
+                      loading={loadingAction === 'send'}
+                      label={resendIn > 0 ? `Resend in ${resendIn}s` : 'Resend Code'}
+                      variant="secondary"
+                    />
+                  </div>
+
+                  {maskedPhone ? (
+                    <p className="text-xs text-slate-500">Sent to {maskedPhone}.</p>
+                  ) : null}
+                </motion.div>
+              ) : null}
+
+              {step === 3 ? (
+                <motion.div
+                  key="step-3"
+                  variants={fadeVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                  className="space-y-3"
+                >
+                  <Field
+                    label="New Password"
+                    type="password"
+                    value={newPassword}
+                    onChange={(event) => setNewPassword(event.target.value)}
+                    placeholder="Enter new password"
+                    icon={<Lock className="h-4 w-4" />}
+                    disabled={isLoading}
+                  />
+                  <Field
+                    label="Confirm New Password"
+                    type="password"
+                    value={confirmPassword}
+                    onChange={(event) => setConfirmPassword(event.target.value)}
+                    placeholder="Confirm new password"
+                    icon={<ShieldCheck className="h-4 w-4" />}
+                    disabled={isLoading}
+                  />
+
+                  <ActionButton
+                    onClick={handleResetPassword}
+                    disabled={isLoading || !firebaseIdToken}
+                    loading={loadingAction === 'reset'}
+                    label="Save New Password"
+                  />
+                </motion.div>
+              ) : null}
+
+              {step === 4 ? (
+                <motion.div
+                  key="step-4"
+                  variants={fadeVariants}
+                  initial="hidden"
+                  animate="visible"
+                  exit="exit"
+                >
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 p-4">
+                    <div className="flex items-start gap-3">
+                      <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-xs font-bold text-emerald-900">
+                          Password updated successfully
+                        </p>
+                        <p className="text-[11px] text-emerald-700 mt-0.5">
+                          You can now sign in using your updated password.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </motion.div>
+              ) : null}
+            </AnimatePresence>
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -453,12 +387,12 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
 
 function Field({ label, icon, ...props }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-sm font-semibold text-slate-200">{label}</span>
-      <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-slate-950/50 px-4 py-3 transition focus-within:border-cyan-300/50 focus-within:ring-1 focus-within:ring-cyan-300/35">
+    <label className="block space-y-1 text-left">
+      <span className="text-xs font-semibold text-slate-700">{label}</span>
+      <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs transition focus-within:border-[#1677FF] focus-within:ring-2 focus-within:ring-blue-100">
         <span className="text-slate-400">{icon}</span>
         <input
-          className="w-full bg-transparent text-sm text-white outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full bg-transparent text-xs text-[#0F2747] outline-none placeholder:text-slate-400"
           {...props}
         />
       </div>
@@ -467,20 +401,20 @@ function Field({ label, icon, ...props }) {
 }
 
 function ActionButton({ onClick, disabled, loading, label, variant = 'primary' }) {
-  const variantClass = variant === 'secondary'
-    ? 'border-white/15 bg-white/10 text-slate-100 hover:bg-white/20'
-    : 'border-cyan-300/40 bg-cyan-300/15 text-cyan-100 hover:bg-cyan-300/25';
-
+  const isPrimary = variant === 'primary';
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`inline-flex min-w-[160px] items-center justify-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${variantClass}`}
+      className={`inline-flex items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+        isPrimary
+          ? 'bg-[#1677FF] text-white hover:bg-blue-600 shadow-xs'
+          : 'border border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+      }`}
     >
-      {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-      {!loading && variant === 'secondary' ? <RefreshCw className="h-4 w-4" /> : null}
-      {!loading && variant === 'primary' ? <ShieldX className="h-4 w-4" /> : null}
+      {loading ? <LoaderCircle className="h-3.5 w-3.5 animate-spin" /> : null}
+      {!loading && variant === 'secondary' ? <RefreshCw className="h-3 w-3" /> : null}
       {label}
     </button>
   );

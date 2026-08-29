@@ -44,6 +44,7 @@ env/
 # OS
 .DS_Store
 Thumbs.db
+Microsoft/
 
 # Firebase credentials (if intended to be private)
 firebase_key.json

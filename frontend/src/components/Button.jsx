@@ -22,7 +22,7 @@ const sizeStyles = {
 
 export function Button({ as: Component = 'button', variant = 'primary', size = 'md', className = '', children, onClick, ...props }) {
   const sharedClasses = [
-    'inline-flex items-center justify-center gap-2 rounded-lg font-semibold transition-all duration-300 focus:outline-none focus:ring-2 focus:ring-blue-300/60 focus:ring-offset-2 focus:ring-offset-slate-950 disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]',
+    'inline-flex items-center justify-center gap-2 rounded-xl font-semibold transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-sky-500/40 focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-50 active:scale-[0.98]',
     variantStyles[variant] || variantStyles.primary,
     sizeStyles[size],
     className,

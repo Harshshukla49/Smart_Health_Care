@@ -10,7 +10,7 @@ export function PatientSignup() {
       mode="signup"
       title={t('auth.rolePage.patientSignupTitle')}
       subtitle={t('auth.rolePage.patientSignupSubtitle')}
-      accent="text-cyan-300"
+      accent="text-[#1677FF]"
       helperCopy={t('auth.rolePage.patientAccountSignup')}
       ctaLabel={t('auth.signUp')}
     />

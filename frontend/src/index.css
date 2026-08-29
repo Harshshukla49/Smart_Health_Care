@@ -1,58 +1,53 @@
-@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ==========================================
-   DESIGN SYSTEM: COLOR VARIABLES
+   CLINICAL DESIGN SYSTEM: VARIABLES
    ========================================== */
 :root {
-  /* Primary Colors */
-  --color-primary: #3b82f6;
-  --color-primary-light: #60a5fa;
-  --color-primary-dark: #1e40af;
+  /* Medical Primary Colors */
+  --color-primary: #0284c7;
+  --color-primary-light: #38bdf8;
+  --color-primary-dark: #0369a1;
   
-  /* Secondary Colors */
-  --color-secondary: #8b5cf6;
-  --color-secondary-light: #a78bfa;
-  --color-secondary-dark: #6d28d9;
-  
-  /* Accent Colors */
-  --color-accent: #14b8a6;
+  /* Medical Accents */
+  --color-accent: #0d9488;
   --color-accent-light: #2dd4bf;
-  --color-accent-dark: #0d9488;
+  --color-accent-dark: #0f766e;
   
-  /* Status Colors */
+  /* Clinical Status Colors */
   --color-success: #10b981;
-  --color-success-light: #34d399;
+  --color-success-light: #d1fae5;
   --color-warning: #f59e0b;
-  --color-warning-light: #fbbf24;
+  --color-warning-light: #fef3c7;
   --color-danger: #ef4444;
-  --color-danger-light: #f87171;
+  --color-danger-light: #fee2e2;
   
-  /* Secondary Gradients */
-  --color-purple: #a855f7;
+  /* Secondary Accents */
+  --color-purple: #7c3aed;
   --color-pink: #ec4899;
   
-  /* Neutral Colors */
-  --color-bg-dark: #050816;
-  --color-bg-darker: #0b1118;
-  --color-bg-card: #0f1729;
-  --color-border: rgba(255, 255, 255, 0.1);
-  --color-border-light: rgba(255, 255, 255, 0.2);
-  --color-text: #e2e8f0;
-  --color-text-muted: #94a3b8;
+  /* Light Neutral Colors */
+  --color-bg-page: #f8fafc;
+  --color-bg-card: #ffffff;
+  --color-border: #e2e8f0;
+  --color-border-light: #f1f5f9;
+  --color-text: #0f172a;
+  --color-text-secondary: #334155;
+  --color-text-muted: #64748b;
   
-  /* Effects */
-  --glow-shadow: 0 0 20px rgba(59, 130, 246, 0.3);
-  --glow-shadow-accent: 0 0 20px rgba(20, 184, 166, 0.3);
-  --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  /* Subtle Clinical Shadows */
+  --glow-shadow: 0 4px 20px rgba(2, 132, 199, 0.12);
+  --glow-shadow-accent: 0 4px 20px rgba(13, 148, 136, 0.12);
+  --glass-shadow: 0 4px 20px rgba(15, 23, 42, 0.04);
   
-  color-scheme: dark;
-  font-family: 'Plus Jakarta Sans', 'Gadugi', 'Segoe UI', ui-sans-serif, system-ui, sans-serif;
-  font-size: 18px;
-  line-height: 1.75;
+  color-scheme: light;
+  font-family: 'Inter', 'Manrope', 'Segoe UI', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
   font-weight: 400;
 }
 
@@ -141,20 +136,26 @@ html {
   font-size: 100%;
 }
 
+/* Ensure smooth scroll and sticky header offset for all dashboard anchor targets */
+section[id],
+div[id] {
+  scroll-margin-top: 100px;
+}
+
 body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: var(--color-text);
-  font-size: 1.125rem;
-  line-height: 1.75;
-  background:
-    radial-gradient(circle at top left, rgba(59, 130, 246, 0.2), transparent 40%),
-    radial-gradient(circle at top right, rgba(168, 85, 247, 0.15), transparent 40%),
-    radial-gradient(circle at bottom left, rgba(20, 184, 166, 0.1), transparent 50%),
-    linear-gradient(135deg, #050816 0%, #0b1118 50%, #06101c 100%);
+  font-family: 'Inter', 'Manrope', 'Segoe UI', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 1rem;
+  line-height: 1.6;
+  background-color: #f8fafc;
+  background-image:
+    radial-gradient(circle at 12% 12%, rgba(2, 132, 199, 0.025), transparent 30%),
+    radial-gradient(circle at 88% 10%, rgba(13, 148, 136, 0.02), transparent 25%),
+    radial-gradient(circle at 50% 90%, rgba(99, 102, 241, 0.015), transparent 30%);
   background-attachment: fixed;
-  color: var(--color-text);
+  color: #0f172a;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -166,8 +167,8 @@ body {
 }
 
 ::selection {
-  background: rgba(59, 130, 246, 0.4);
-  color: white;
+  background: #bae6fd;
+  color: #0369a1;
 }
 
 /* ==========================================
@@ -247,30 +248,29 @@ button {
    UTILITY CLASSES
    ========================================== */
 .glass {
-  background: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(14px);
+  background: #ffffff;
   border: 1px solid var(--color-border);
-  box-shadow: var(--glass-shadow);
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.035);
 }
 
 .glass-sm {
-  background: rgba(15, 23, 42, 0.5);
-  backdrop-filter: blur(8px);
+  background: #ffffff;
   border: 1px solid var(--color-border);
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .glass-lg {
-  background: rgba(15, 23, 42, 0.35);
-  backdrop-filter: blur(20px);
+  background: #ffffff;
   border: 1px solid var(--color-border);
+  box-shadow: 0 8px 30px rgba(15, 23, 42, 0.06);
 }
 
 .glow-primary {
-  box-shadow: 0 0 20px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 4px 18px rgba(2, 132, 199, 0.16);
 }
 
 .glow-accent {
-  box-shadow: 0 0 20px rgba(20, 184, 166, 0.4);
+  box-shadow: 0 4px 18px rgba(13, 148, 136, 0.16);
 }
 
 .glow-pulse {
@@ -282,7 +282,7 @@ button {
 }
 
 .heart-beat {
-  animation: heart-beat 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  animation: heart-beat 1.1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 .float {
@@ -300,11 +300,11 @@ button {
 /* Responsive utilities */
 @media (max-width: 768px) {
   :root {
-    font-size: 16px;
+    font-size: 15px;
   }
 
   body {
-    font-size: 1rem;
+    font-size: 0.95rem;
   }
 }
 
@@ -319,57 +319,49 @@ button {
    CARD COMPONENT SYSTEM
    ========================================== */
 .card {
-  border-radius: 16px;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.035);
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.card:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
 }
 
 .card-glass {
-  @apply glass rounded-2xl p-6;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  box-shadow: 0 4px 20px rgba(15, 23, 42, 0.035);
 }
 
 .card-glass:hover {
-  background: rgba(15, 23, 42, 0.5);
-  border-color: var(--color-border-light);
-  transform: translateY(-2px);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+  border-color: #cbd5e1;
+  box-shadow: 0 8px 28px rgba(15, 23, 42, 0.06);
 }
 
-/* Vital Card Gradients */
+/* Vital Card Clinical Tints */
 .card-vitals-heart {
-  position: relative;
-  overflow: hidden;
+  background-color: #ffffff;
+  border-top: 3px solid #f43f5e;
 }
 
-.card-vitals-heart::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
-  pointer-events: none;
+.card-vitals-spo2 {
+  background-color: #ffffff;
+  border-top: 3px solid #0d9488;
 }
 
-.card-vitals-spo2::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(20, 184, 166, 0.1), rgba(34, 197, 94, 0.1));
-  pointer-events: none;
+.card-vitals-temperature {
+  background-color: #ffffff;
+  border-top: 3px solid #f59e0b;
 }
 
-.card-vitals-temperature::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(249, 115, 22, 0.1), rgba(239, 68, 68, 0.1));
-  pointer-events: none;
-}
-
-.card-vitals-ecg::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(168, 85, 247, 0.1), rgba(236, 72, 153, 0.1));
-  pointer-events: none;
+.card-vitals-ecg {
+  background-color: #ffffff;
+  border-top: 3px solid #0284c7;
 }
 
 /* ==========================================
@@ -474,73 +466,72 @@ button {
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #0ea5e9 0%, #22d3ee 50%, #2dd4bf 100%);
-  color: white;
-  border-color: rgba(103, 232, 249, 0.3);
-  box-shadow: 0 12px 30px rgba(14, 165, 233, 0.3), inset 0 -1px 0 rgba(255, 255, 255, 0.2);
+  background-color: #0284c7;
+  color: #ffffff;
+  border-color: #0284c7;
+  box-shadow: 0 2px 8px rgba(2, 132, 199, 0.22);
 }
 
 .btn-primary:hover {
-  transform: translateY(-3px) scale(1.02);
-  filter: saturate(1.08);
-  border-color: rgba(103, 232, 249, 0.55);
-  box-shadow: 0 20px 44px rgba(14, 165, 233, 0.42), 0 0 0 1px rgba(34, 211, 238, 0.4);
+  background-color: #0369a1;
+  border-color: #0369a1;
+  box-shadow: 0 4px 14px rgba(2, 132, 199, 0.32);
 }
 
 .btn-secondary {
-  background: linear-gradient(135deg, rgba(15, 23, 42, 0.75), rgba(15, 23, 42, 0.92));
-  color: #e2e8f0;
-  border-color: rgba(148, 163, 184, 0.24);
-  box-shadow: 0 12px 26px rgba(2, 6, 23, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  background-color: #ffffff;
+  color: #1e293b;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
 }
 
 .btn-secondary:hover {
-  transform: translateY(-3px) scale(1.01);
-  border-color: rgba(94, 234, 212, 0.45);
-  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.45), 0 0 0 1px rgba(45, 212, 191, 0.25);
+  background-color: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
 }
 
 .btn-accent {
-  background: linear-gradient(135deg, var(--color-accent), var(--color-accent-light));
-  color: white;
-  box-shadow: 0 4px 15px rgba(20, 184, 166, 0.3);
+  background-color: #0d9488;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(13, 148, 136, 0.22);
 }
 
 .btn-accent:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(20, 184, 166, 0.5);
+  background-color: #0f766e;
 }
 
 .btn-danger {
-  background: linear-gradient(135deg, var(--color-danger), var(--color-danger-light));
-  color: white;
-  box-shadow: 0 4px 15px rgba(239, 68, 68, 0.3);
+  background-color: #ef4444;
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.2);
 }
 
 .btn-danger:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(239, 68, 68, 0.5);
+  background-color: #dc2626;
 }
 
 .btn-ghost {
-  background: transparent;
-  color: var(--color-text);
-  border: 1px solid var(--color-border);
+  background-color: transparent;
+  color: #475569;
+  border: 1px solid transparent;
 }
 
 .btn-ghost:hover {
-  background: rgba(59, 130, 246, 0.1);
-  border-color: var(--color-primary);
+  background-color: #f1f5f9;
+  color: #0f172a;
 }
 
 .btn-sm {
-  padding: 0.5rem 1rem;
-  font-size: 0.875rem;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.825rem;
+  border-radius: 10px;
 }
 
 .btn-lg {
-  padding: 1rem 2.1rem;
-  font-size: 1.03rem;
+  padding: 0.85rem 1.75rem;
+  font-size: 1rem;
+  border-radius: 14px;
 }
 
 .btn:active {
@@ -672,16 +663,15 @@ button {
 }
 
 .vital-value.critical {
-  color: var(--color-danger-light);
-  animation: pulse-glow 1.5s ease-in-out infinite;
+  color: #ef4444;
 }
 
 .vital-value.warning {
-  color: var(--color-warning-light);
+  color: #d97706;
 }
 
 .vital-value.normal {
-  color: var(--color-success-light);
+  color: #0f172a;
 }
 
 /* ==========================================
@@ -693,12 +683,12 @@ button {
   top: 0;
   width: 280px;
   height: 100vh;
-  background: rgba(5, 8, 22, 0.8);
-  backdrop-filter: blur(12px);
-  border-right: 1px solid var(--color-border);
+  background: #ffffff;
+  border-right: 1px solid #e2e8f0;
   overflow-y: auto;
   z-index: 100;
   transition: transform 0.3s ease;
+  box-shadow: 0 0 25px rgba(0, 0, 0, 0.03);
 }
 
 .sidebar.mobile-hidden {
@@ -716,7 +706,7 @@ button {
   padding: 0.75rem 1rem;
   margin-bottom: 0.5rem;
   border-radius: 10px;
-  color: var(--color-text-muted);
+  color: #475569;
   text-decoration: none;
   transition: all 0.2s ease;
   cursor: pointer;
@@ -724,17 +714,14 @@ button {
 }
 
 .nav-item:hover {
-  background: rgba(59, 130, 246, 0.1);
-  color: var(--color-primary-light);
-  border-color: var(--color-primary);
+  background: #f1f5f9;
+  color: #0284c7;
 }
 
 .nav-item.active {
-  background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.1));
-  color: var(--color-primary-light);
-  border-color: var(--color-primary);
+  background: #e0f2fe;
+  color: #0369a1;
   font-weight: 600;
-  box-shadow: inset 0 0 12px rgba(59, 130, 246, 0.1);
 }
 
 /* ==========================================
@@ -784,30 +771,28 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  border-radius: 9999px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  background:
-    linear-gradient(135deg, rgba(14, 165, 233, 0.3), rgba(236, 72, 153, 0.22)),
-    rgba(15, 23, 42, 0.42);
-  padding: 0.6rem 0.95rem;
-  font-size: 0.85rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #e2e8f0;
+  border-radius: 12px;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  padding: 0.5rem 0.85rem;
+  font-size: 0.825rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: #475569;
   text-decoration: none;
-  backdrop-filter: blur(14px);
-  box-shadow: 0 10px 30px rgba(2, 6, 23, 0.35);
-  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: all 0.2s ease;
 }
 
 .dashboard-back-link:hover {
-  transform: translateY(-1px);
-  border-color: rgba(56, 189, 248, 0.7);
-  box-shadow: 0 16px 36px rgba(14, 165, 233, 0.25);
+  background-color: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0284c7;
+  box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
 }
 
 .dashboard-back-link:focus-visible {
-  outline: 2px solid rgba(56, 189, 248, 0.9);
+  outline: 2px solid #0284c7;
   outline-offset: 2px;
 }
 
@@ -818,7 +803,7 @@ button {
 
 @media (max-width: 768px) {
   .dashboard-back-link {
-    padding: 0.55rem 0.8rem;
+    padding: 0.45rem 0.75rem;
   }
 }
 
@@ -830,6 +815,18 @@ button {
   .dashboard-back-link {
     justify-content: center;
     min-width: 2.25rem;
-    padding: 0.55rem;
+    padding: 0.45rem;
   }
 }
+
+/* ==========================================
+   ECG MEDICAL GRID PATTERN
+   ========================================== */
+.ecg-grid-background {
+  background-color: #ffffff;
+  background-image: 
+    linear-gradient(to right, rgba(226, 232, 240, 0.6) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(226, 232, 240, 0.6) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+

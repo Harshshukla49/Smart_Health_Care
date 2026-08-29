@@ -1,104 +1,263 @@
 import React, { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import toast from 'react-hot-toast';
 import {
   Activity,
   BellRing,
-  CalendarDays,
   ChevronRight,
   FileText,
   HeartPulse,
   LayoutDashboard,
-  LineChart,
-  Pill,
+  LogOut,
   PlusCircle,
   Settings,
   ShieldAlert,
+  ShieldCheck,
+  Stethoscope,
+  UserRound,
   UsersRound,
   Waves,
   X,
 } from 'lucide-react';
+import { clearAuthSession, getAuthSession } from '../../utils/auth';
 
-const doctorNavigation = [
-  { label: 'Overview', to: '/dashboard', icon: LayoutDashboard, end: true },
-  { label: 'Live monitoring', to: '/dashboard#vitals', icon: Activity },
-  { label: 'Patients', to: '/dashboard#patients', icon: UsersRound },
-  { label: 'Add patient', to: '/add-patient', icon: PlusCircle },
-  { label: 'Risk predictions', to: '/dashboard#insights', icon: ShieldAlert },
-  { label: 'ECG analysis', to: '/dashboard#ecg', icon: Waves },
-  { label: 'Reports', to: '/dashboard#reports', icon: FileText },
-  { label: 'Notifications', to: '/dashboard#alerts', icon: BellRing },
-  { label: 'Settings', to: '/dashboard#profile', icon: Settings },
-];
+function getNavigationSections(role) {
+  const isDoctor = role === 'doctor';
 
-const patientNavigation = [
-  { label: 'Overview', to: '/dashboard', icon: LayoutDashboard, end: true },
-  { label: 'My vitals', to: '/dashboard#vitals', icon: HeartPulse },
-  { label: 'Live ECG', to: '/dashboard#ecg', icon: Waves },
-  { label: 'Medicines', to: '/dashboard#medicines', icon: Pill },
-  { label: 'Appointments', to: '/dashboard#appointments', icon: CalendarDays },
-  { label: 'Reports', to: '/dashboard#reports', icon: FileText },
-  { label: 'Emergency', to: '/dashboard#alerts', icon: ShieldAlert },
-  { label: 'Settings', to: '/dashboard#profile', icon: Settings },
-];
+  if (!isDoctor) {
+    // PATIENT SCOPED NAVIGATION:
+    return [
+      {
+        title: 'MY HEALTH',
+        items: [
+          { id: 'overview', label: 'Health Overview', to: '/dashboard', icon: LayoutDashboard },
+          { id: 'vitals', label: 'My Live Vitals', to: '/dashboard#vitals', icon: Activity },
+          { id: 'patients', label: 'My Care Team', to: '/dashboard#patients', icon: UsersRound },
+        ],
+      },
+      {
+        title: 'RECORDS & ALERTS',
+        items: [
+          { id: 'ecg', label: 'My ECG Rhythm', to: '/dashboard#ecg', icon: Waves },
+          { id: 'reports', label: 'Health Reports', to: '/dashboard#reports', icon: FileText },
+          { id: 'alerts', label: 'Emergency & SOS', to: '/dashboard#alerts', icon: BellRing },
+        ],
+      },
+      {
+        title: 'ACCOUNT',
+        items: [
+          { id: 'settings', label: 'Account & SOS', to: '/settings', icon: Settings },
+        ],
+      },
+    ];
+  }
 
-function SidebarLinks({ role, onNavigate, mobile = false }) {
-  const items = role === 'doctor' ? doctorNavigation : patientNavigation;
+  // DOCTOR SCOPED NAVIGATION:
+  return [
+    {
+      title: 'CLINICAL COMMAND',
+      items: [
+        { id: 'overview', label: 'Ward Overview', to: '/dashboard', icon: LayoutDashboard },
+        { id: 'vitals', label: 'Live Monitoring', to: '/dashboard#vitals', icon: Activity },
+        { id: 'patients', label: 'Patients Roster', to: '/dashboard#patients', icon: UsersRound },
+        { id: 'add-patient', label: 'Add Patient', to: '/add-patient', icon: PlusCircle },
+      ],
+    },
+    {
+      title: 'DIAGNOSTICS & TRIAGE',
+      items: [
+        { id: 'insights', label: 'Risk Predictions', to: '/dashboard#insights', icon: ShieldAlert },
+        { id: 'ecg', label: 'ECG Analysis', to: '/dashboard#ecg', icon: Waves },
+        { id: 'reports', label: 'Clinical Reports', to: '/dashboard#reports', icon: FileText },
+        { id: 'alerts', label: 'Emergency Alerts', to: '/dashboard#alerts', icon: BellRing },
+      ],
+    },
+    {
+      title: 'SYSTEM',
+      items: [
+        { id: 'settings', label: 'Clinical Settings', to: '/settings', icon: Settings },
+      ],
+    },
+  ];
+}
+
+function SidebarLinks({
+  activeSection,
+  onSectionSelect,
+  onNavigate,
+  onLogout,
+  collapsed = false,
+  mobile = false,
+  role = 'patient',
+}) {
   const location = useLocation();
+  const navigate = useNavigate();
+  const navigationSections = getNavigationSections(role);
+
+  const isItemActive = (item) => {
+    if (item.id === 'settings' || item.to === '/settings') {
+      return location.pathname === '/settings';
+    }
+
+    if (item.id === 'add-patient' || item.to === '/add-patient') {
+      return location.pathname === '/add-patient';
+    }
+
+    if (location.pathname === '/dashboard') {
+      if (activeSection) {
+        if (item.id === 'overview' && activeSection === 'overview') return true;
+        if (item.id === activeSection) return true;
+        return false;
+      }
+
+      const currentHash = location.hash ? location.hash.replace('#', '') : '';
+      if (!currentHash && item.id === 'overview') {
+        return true;
+      }
+      return item.id === currentHash;
+    }
+
+    return false;
+  };
+
+  const handleItemClick = (e, item) => {
+    e.preventDefault();
+    if (mobile && onNavigate) {
+      onNavigate();
+    }
+
+    if (item.to === '/add-patient' && role !== 'doctor') {
+      toast.error('Access Denied: Only authorized doctors can register new patients.');
+      return;
+    }
+
+    if (item.to === '/settings') {
+      navigate('/settings');
+      return;
+    }
+
+    if (item.to === '/add-patient') {
+      navigate('/add-patient');
+      return;
+    }
+
+    if (item.to === '/dashboard') {
+      if (location.pathname === '/dashboard') {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+        window.history.pushState(null, '', '/dashboard');
+        onSectionSelect?.('overview');
+      } else {
+        navigate('/dashboard');
+      }
+      return;
+    }
+
+    const [path, hash = ''] = item.to.split('#');
+    if (hash) {
+      if (location.pathname === '/dashboard') {
+        const el = document.getElementById(hash);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth' });
+          window.history.pushState(null, '', `/dashboard#${hash}`);
+          onSectionSelect?.(hash);
+        }
+      } else {
+        navigate(item.to);
+      }
+    }
+  };
 
   return (
-    <nav aria-label={`${role === 'doctor' ? 'Doctor' : 'Patient'} dashboard navigation`} className="space-y-1.5">
-      {items.map((item) => {
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.label}
-            to={item.to}
-            onClick={onNavigate}
-            className={(() => {
-              const [path, hash = ''] = item.to.split('#');
-              const isActive = path === location.pathname && (hash ? `#${hash}` === location.hash : !location.hash);
-              return [
-              'group relative flex items-center gap-3 overflow-hidden rounded-2xl px-3.5 py-3 text-sm font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80',
-              isActive ? 'text-white' : 'text-slate-400 hover:bg-white/[0.07] hover:text-slate-100',
-              ].join(' ');
-            })()}
-          >
-            {(() => {
-              const [path, hash = ''] = item.to.split('#');
-              const isActive = path === location.pathname && (hash ? `#${hash}` === location.hash : !location.hash);
+    <nav aria-label="Dashboard navigation" className="space-y-4">
+      {navigationSections.map((section) => (
+        <div key={section.title} className="space-y-1">
+          {!collapsed && (
+            <p className="px-3 text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
+              {section.title}
+            </p>
+          )}
+          <div className="space-y-0.5">
+            {section.items.map((item) => {
+              const Icon = item.icon;
+              const isActive = isItemActive(item);
+
               return (
-              <>
-                {isActive ? <motion.span layoutId={mobile ? 'mobile-dashboard-nav' : 'dashboard-nav'} className="absolute inset-0 rounded-2xl border border-cyan-300/20 bg-gradient-to-r from-cyan-400/20 via-sky-500/12 to-violet-500/15" transition={{ type: 'spring', stiffness: 360, damping: 30 }} /> : null}
-                <Icon className={`relative h-4 w-4 shrink-0 ${isActive ? 'text-cyan-200' : 'text-slate-500 transition group-hover:text-cyan-200'}`} />
-                <span className="relative flex-1">{item.label}</span>
-                {mobile ? <ChevronRight className="relative h-4 w-4 text-slate-500" /> : null}
-              </>
+                <a
+                  key={item.label}
+                  href={item.to}
+                  onClick={(e) => handleItemClick(e, item)}
+                  title={item.label}
+                  className={`group flex items-center gap-3 rounded-[11px] px-3 py-2.5 text-xs font-semibold transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 ${
+                    isActive
+                      ? 'bg-[#EFF8FF] text-[#0284C7] font-bold border border-[#BAE6FD] shadow-xs'
+                      : 'text-[#64748B] hover:bg-slate-50 hover:text-[#0F172A] border border-transparent'
+                  } ${collapsed ? 'justify-center px-2' : ''}`}
+                >
+                  <Icon
+                    className={`h-4 w-4 shrink-0 transition-colors ${
+                      isActive ? 'text-[#0284C7]' : 'text-slate-400 group-hover:text-[#0F172A]'
+                    }`}
+                  />
+                  {!collapsed && <span className="flex-1 truncate">{item.label}</span>}
+                  {mobile && !collapsed ? (
+                    <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+                  ) : null}
+                </a>
               );
-            })()}
-          </Link>
-        );
-      })}
+            })}
+          </div>
+        </div>
+      ))}
     </nav>
   );
 }
 
-function SidebarIdentity({ role }) {
-  const isDoctor = role === 'doctor';
+function SidebarIdentity({ collapsed = false }) {
+  const session = getAuthSession();
+  const isDoctor = session?.role === 'doctor';
+
   return (
-    <Link to="/dashboard" className="flex items-center gap-3 rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80">
-      <span className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-cyan-300 via-sky-400 to-violet-500 text-slate-950 shadow-[0_10px_30px_rgba(34,211,238,0.25)]">
-        <HeartPulse className="h-5 w-5" aria-hidden="true" />
-      </span>
-      <span>
-        <span className="block text-sm font-bold tracking-tight text-white">Care workspace</span>
-        <span className="mt-0.5 block text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">{isDoctor ? 'Clinical command' : 'Personal health'}</span>
-      </span>
-    </Link>
+    <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : ''}`}>
+      <div className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-[#0284C7] to-blue-700 text-white shadow-md shadow-sky-500/20">
+        <HeartPulse className="h-5 w-5 fill-white/20 stroke-white stroke-[2.2]" />
+      </div>
+
+      {!collapsed && (
+        <div className="min-w-0 flex-1">
+          <p className="truncate font-sans text-sm font-extrabold text-[#0F172A] tracking-tight">
+            Smart Healthcare
+          </p>
+          <div className="flex items-center gap-1.5 mt-0.5">
+            <span className={`h-1.5 w-1.5 rounded-full ${isDoctor ? 'bg-emerald-500' : 'bg-sky-500'} animate-pulse`} />
+            <p className="truncate text-[10px] font-bold uppercase tracking-wider text-[#64748B]">
+              {isDoctor ? 'Clinical Command' : 'Patient Portal'}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
-export function DashboardSidebar({ role = 'patient', mobileOpen, onClose }) {
+export function Sidebar({
+  mobileOpen,
+  onClose,
+  activeSection,
+  onSectionSelect,
+  collapsed = false,
+  role = 'patient',
+}) {
+  const navigate = useNavigate();
+  const activeSession = getAuthSession();
+  const isDoctor = (activeSession?.role || role) === 'doctor';
+
+  const handleLogout = () => {
+    clearAuthSession();
+    toast.success('Logged out successfully.');
+    navigate('/login', { replace: true });
+  };
+
   useEffect(() => {
     if (!mobileOpen) return undefined;
     const onKeyDown = (event) => {
@@ -108,45 +267,155 @@ export function DashboardSidebar({ role = 'patient', mobileOpen, onClose }) {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [mobileOpen, onClose]);
 
+  const userName =
+    activeSession?.name || (isDoctor ? 'Abhishek Rai' : 'Akash Soni');
+  const userRoleTitle = isDoctor ? 'Cardiologist' : 'Patient';
+  const userEmail =
+    activeSession?.email || (isDoctor ? 'abhishek@gmail.com' : 'akash.soni@email.com');
+  const userInitials = (userName || (isDoctor ? 'AB' : 'AS')).slice(0, 2).toUpperCase();
+
   return (
     <>
-      <aside className="sticky top-24 hidden h-[calc(100vh-7rem)] w-64 shrink-0 flex-col rounded-[1.75rem] border border-white/10 bg-slate-950/55 p-4 shadow-[0_24px_70px_rgba(2,6,23,0.32)] backdrop-blur-2xl lg:flex">
-        <SidebarIdentity role={role} />
-        <div className="my-5 h-px bg-gradient-to-r from-cyan-300/35 via-white/10 to-transparent" />
-        <SidebarLinks role={role} />
-        <div className="mt-auto rounded-2xl border border-white/10 bg-gradient-to-br from-cyan-400/10 via-slate-950/30 to-violet-400/10 p-4">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-cyan-200">Secure by design</p>
-          <p className="mt-2 text-xs leading-5 text-slate-400">Your workspace is scoped to the people and health data you are allowed to access.</p>
+      {/* Desktop Clean White Sidebar */}
+      <aside
+        className={`sticky top-20 hidden h-[calc(100vh-6rem)] shrink-0 flex-col rounded-[16px] border border-[#E2E8F0] bg-white p-4 shadow-[0_4px_18px_rgba(15,23,42,0.04)] transition-all duration-200 lg:flex ${
+          collapsed ? 'w-20' : 'w-64'
+        }`}
+      >
+        <SidebarIdentity collapsed={collapsed} />
+
+        <div className="my-4 h-px bg-slate-100" />
+
+        <div className="flex-1 overflow-y-auto pr-1">
+          <SidebarLinks
+            activeSection={activeSection}
+            onSectionSelect={onSectionSelect}
+            onLogout={handleLogout}
+            collapsed={collapsed}
+            role={activeSession?.role || role}
+          />
+        </div>
+
+        {/* Bottom Profile & Role Isolation Card */}
+        <div className="mt-3 space-y-2.5 pt-3 border-t border-slate-100">
+          <div
+            className={`rounded-xl border border-slate-200/90 bg-slate-50/70 p-2.5 shadow-2xs ${
+              collapsed ? 'flex justify-center p-2' : ''
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <span
+                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border text-xs font-bold text-white shadow-xs ${
+                  isDoctor
+                    ? 'bg-gradient-to-br from-[#0284C7] to-blue-700 border-white ring-1 ring-sky-200'
+                    : 'bg-gradient-to-br from-sky-500 to-teal-600 border-white ring-1 ring-teal-200'
+                }`}
+                title={`${userName} (${userRoleTitle})`}
+              >
+                {userInitials}
+              </span>
+              {!collapsed && (
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-bold text-[#0F172A] leading-tight">
+                    {userName}
+                  </p>
+                  <p className="truncate text-[10px] font-medium text-[#64748B] mt-0.5">
+                    <span className={`font-semibold ${isDoctor ? 'text-[#0284C7]' : 'text-teal-700'}`}>
+                      {userRoleTitle}
+                    </span>{' '}
+                    · {userEmail}
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {!collapsed ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50/70 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 hover:border-rose-300 shadow-2xs"
+                title="Logout"
+              >
+                <LogOut className="h-3.5 w-3.5 text-rose-600" />
+                <span>Logout</span>
+              </button>
+            ) : null}
+          </div>
+
+          {/* Secure & Role Compliant Badge Card */}
+          {!collapsed && (
+            <div className="rounded-xl border border-slate-200/70 bg-white p-2.5 flex items-start gap-2 shadow-2xs">
+              <ShieldCheck className={`h-4 w-4 shrink-0 mt-0.5 ${isDoctor ? 'text-[#0284C7]' : 'text-teal-600'}`} />
+              <div>
+                <p className="text-[11px] font-bold text-[#0F172A] leading-tight">
+                  {isDoctor ? 'Clinical Role Scoped' : 'Personal Data Scoped'}
+                </p>
+                <p className="mt-0.5 text-[10px] text-[#64748B] leading-tight">
+                  {isDoctor
+                    ? 'Authorized for ward patient triage and telemetry monitoring.'
+                    : 'Restricted strictly to your personal medical records.'}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
       </aside>
 
+      {/* Mobile Drawer (Clean White Clinical Style) */}
       <AnimatePresence>
         {mobileOpen ? (
           <>
             <motion.button
               type="button"
               aria-label="Close dashboard navigation"
-              className="fixed inset-0 z-[70] bg-slate-950/75 backdrop-blur-sm lg:hidden"
+              className="fixed inset-0 z-[70] bg-slate-900/40 backdrop-blur-xs lg:hidden"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={onClose}
             />
             <motion.aside
-              className="fixed inset-y-0 left-0 z-[80] flex w-[86%] max-w-sm flex-col border-r border-white/10 bg-[#07111f]/95 p-5 shadow-[0_28px_100px_rgba(2,6,23,0.6)] backdrop-blur-2xl lg:hidden"
+              className="fixed inset-y-0 left-0 z-[80] flex w-[86%] max-w-sm flex-col border-r border-slate-200 bg-white p-5 shadow-2xl lg:hidden"
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', stiffness: 340, damping: 34 }}
             >
               <div className="flex items-center justify-between">
-                <SidebarIdentity role={role} />
-                <button type="button" onClick={onClose} aria-label="Close dashboard navigation" className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-white/5 text-slate-200 transition hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/80">
-                  <X className="h-5 w-5" />
+                <SidebarIdentity />
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label="Close dashboard navigation"
+                  className="grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-600 transition hover:bg-slate-100"
+                >
+                  <X className="h-4 w-4" />
                 </button>
               </div>
-              <div className="my-6 h-px bg-gradient-to-r from-cyan-300/35 via-white/10 to-transparent" />
-              <SidebarLinks role={role} mobile onNavigate={onClose} />
+
+              <div className="my-4 h-px bg-slate-100" />
+
+              <div className="flex-1 overflow-y-auto pr-1">
+                <SidebarLinks
+                  activeSection={activeSection}
+                  onSectionSelect={onSectionSelect}
+                  onNavigate={onClose}
+                  onLogout={handleLogout}
+                  mobile
+                  role={activeSession?.role || role}
+                />
+              </div>
+
+              <div className="mt-4 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 py-2 text-xs font-bold text-rose-700 shadow-2xs"
+                >
+                  <LogOut className="h-4 w-4" />
+                  <span>Logout</span>
+                </button>
+              </div>
             </motion.aside>
           </>
         ) : null}
@@ -154,3 +423,6 @@ export function DashboardSidebar({ role = 'patient', mobileOpen, onClose }) {
     </>
   );
 }
+
+export { Sidebar as DashboardSidebar };
+export default Sidebar;

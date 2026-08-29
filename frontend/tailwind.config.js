@@ -15,19 +15,33 @@ export default {
     },
     extend: {
       fontFamily: {
-        body: ['Gadugi', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        heading: ['Bodoni MT', 'Bodoni 72', 'Didot', 'Iowan Old Style', 'Times New Roman', 'serif'],
-        sans: ['Gadugi', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        display: ['Bodoni MT', 'Bodoni 72', 'Didot', 'Iowan Old Style', 'Times New Roman', 'serif'],
+        body: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        heading: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        display: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
       colors: {
-        ink: '#08101f',
-        panel: 'rgba(15, 23, 42, 0.55)',
-        line: 'rgba(148, 163, 184, 0.18)',
+        ink: '#0f172a',
+        panel: '#ffffff',
+        line: '#e2e8f0',
+        medical: {
+          50: '#f0f9ff',
+          100: '#e0f2fe',
+          200: '#bae6fd',
+          300: '#7dd3fc',
+          400: '#38bdf8',
+          500: '#0ea5e9',
+          600: '#0284c7',
+          700: '#0369a1',
+          800: '#075985',
+          900: '#0c4a6e',
+        },
       },
       boxShadow: {
-        glow: '0 18px 60px rgba(14, 165, 233, 0.16)',
-        glass: '0 20px 80px rgba(2, 6, 23, 0.35)',
+        glow: '0 8px 25px rgba(2, 132, 199, 0.12)',
+        glass: '0 4px 20px rgba(15, 23, 42, 0.04)',
+        medical: '0 4px 20px rgba(15, 23, 42, 0.04)',
+        'medical-hover': '0 10px 30px rgba(15, 23, 42, 0.07)',
       },
       keyframes: {
         fadeUp: {
