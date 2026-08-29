@@ -43,6 +43,7 @@ export function DashboardLayout({
   };
 
   const isDoctor = currentRole === 'doctor';
+  const workspaceLabel = isDoctor ? 'Clinical Workspace' : 'Personal Health Workspace';
   const doctorName = session?.name || (isDoctor ? 'Physician' : 'Patient');
   const doctorTitle = isDoctor ? (session?.specialty || 'Attending Physician') : 'Patient';
   const initials = (doctorName || (isDoctor ? 'MD' : 'PT')).slice(0, 2).toUpperCase();
