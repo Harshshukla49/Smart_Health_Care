@@ -49,7 +49,7 @@ import { Button } from '../components/Button';
 import { Loader } from '../components/Loader';
 import { ECGChart } from '../components/ECGChart';
 import { VitalCard } from '../components/VitalCard';
-import { AlertsPanel } from '../components/AlertsPanel';
+import { ClinicalReportSection } from '../components/ClinicalReportSection';
 import { LiveVitalsProvider, useLiveVitals } from '../context/LiveVitalsContext';
 import { EmergencyProvider, useEmergency } from '../context/EmergencyContext';
 import { useVideoCall } from '../context/VideoCallContext';
@@ -116,6 +116,8 @@ function DashboardBody({ liveVitals }) {
   const [doctorSpecialty, setDoctorSpecialty] = useState(session?.doctorSpecialty || '');
   const [doctorEmail, setDoctorEmail] = useState(session?.doctorEmail || '');
   const [doctorPhone, setDoctorPhone] = useState(session?.doctorPhone || '');
+  const [patientAge, setPatientAge] = useState(session?.age || 24);
+  const [patientGender, setPatientGender] = useState(session?.gender || 'Male');
   const [showLocationMapModal, setShowLocationMapModal] = useState(false);
 
   // SECURITY FIX: Real assigned patient count without synthetic fallback
@@ -297,6 +299,12 @@ function DashboardBody({ liveVitals }) {
         if (doctorSpecialtyValue) {
           setDoctorSpecialty(String(doctorSpecialtyValue).trim());
         }
+        if (profile?.age) {
+          setPatientAge(profile.age);
+        }
+        if (profile?.gender) {
+          setPatientGender(profile.gender);
+        }
       } catch {
         if (active) {
           setDoctorEmail('');
@@ -377,6 +385,11 @@ function DashboardBody({ liveVitals }) {
     (isDoctor ? 'WARD-4B' : 'PT-ACTIVE')
   );
   const currentLastUpdate = updatedAt || new Date().toLocaleTimeString();
+
+  const activeFirstPatient = isDoctor && Array.isArray(doctorPatients) && doctorPatients.length > 0 ? doctorPatients[0] : null;
+  const effectiveAge = activeFirstPatient?.age || patientAge || 24;
+  const rawGender = activeFirstPatient?.gender || patientGender || 'Male';
+  const effectiveGender = rawGender ? (rawGender.charAt(0).toUpperCase() + rawGender.slice(1)) : 'Male';
 
   // Dynamically resolve attending doctor details (zero hardcoded mock fallbacks)
   const rawDoctorName = isDoctor
@@ -897,151 +910,26 @@ function DashboardBody({ liveVitals }) {
           </section>
 
           {/* =======================================================
-              5. CLINICAL REPORTS (id="reports")
+              5. CLINICAL TELEMETRY & DIAGNOSTICS REPORT (id="reports", id="alerts")
              ======================================================= */}
-          <section id="reports" className="scroll-mt-24 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[11px] font-bold text-sky-700">
-                  <FileCheck2 className="h-3.5 w-3.5 text-sky-600" />
-                  <span>Diagnostics Documentation</span>
-                </div>
-                <h3 className="font-sans text-xl font-bold text-slate-900 mt-2">
-                  Clinical Telemetry & Diagnostics Report
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Generated {currentLastUpdate} · Continuous physiological telemetry summary
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  onClick={handlePrintReport}
-                  className="bg-[#0284C7] hover:bg-[#0369A1] text-white rounded-[10px] text-xs font-semibold px-3.5 py-2 shadow-xs transition"
-                >
-                  <Printer className="h-3.5 w-3.5 mr-1.5" />
-                  Download / Print Report (PDF)
-                </Button>
-              </div>
-            </div>
-
-            <Card className="p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[16px] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 pb-5 border-b border-slate-100">
-                <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Patient Identifier</p>
-                  <p className="text-sm font-bold text-[#0F172A] mt-0.5">{currentPatientName}</p>
-                  <p className="text-xs text-[#64748B]">{currentPatientId} · Male, 24y</p>
-                </div>
-
-                <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Attending Physician</p>
-                  <p className="text-sm font-bold text-[#0F172A] mt-0.5">{attendingDoctorName}</p>
-                  <p className="text-xs text-[#64748B]">{attendingDoctorSpecialty}</p>
-                </div>
-
-                <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Telemetry Session</p>
-                  <p className="text-sm font-bold text-[#0F172A] mt-0.5">Continuous 250 Hz</p>
-                  <p className="text-xs text-[#64748B]">Signal Integrity 98%</p>
-                </div>
-
-                <div className="rounded-xl border border-[#E2E8F0] bg-slate-50/60 p-3.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Assessment</p>
-                  <p className="text-sm font-bold text-emerald-700 mt-0.5">Normal Sinus Rhythm</p>
-                  <p className="text-xs text-[#64748B]">Risk Score: {risk_score !== undefined ? risk_score : '0.18'}</p>
-                </div>
-              </div>
-
-              {/* Report Tables / Summary */}
-              <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
-                <div className="space-y-2">
-                  <p className="font-bold text-[#0F172A]">Vital Signs Interval Summary</p>
-                  <ul className="space-y-1.5 text-[#64748B]">
-                    <li>• Heart Rate Mean: <strong className="text-[#0F172A]">{heartRate || 72} BPM</strong> (Normal)</li>
-                    <li>• Arterial SpO2: <strong className="text-[#0F172A]">{spo2 || 98}%</strong> (Optimal)</li>
-                    <li>• Core Temperature: <strong className="text-[#0F172A]">{temperature || 36.7}°C</strong> (Afebrile)</li>
-                    <li>• Blood Pressure: <strong className="text-[#0F172A]">120/80 mmHg</strong> (Normotensive)</li>
-                  </ul>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="font-bold text-[#0F172A]">ECG Interval Measurements</p>
-                  <ul className="space-y-1.5 text-[#64748B]">
-                    <li>• Rhythm Classification: <strong className="text-[#0F172A]">Normal Sinus</strong></li>
-                    <li>• PR Interval: <strong className="text-[#0F172A]">148 ms</strong></li>
-                    <li>• QRS Duration: <strong className="text-[#0F172A]">84 ms</strong></li>
-                    <li>• ST Segment: <strong className="text-[#0F172A]">Isoelectric / Normal</strong></li>
-                  </ul>
-                </div>
-
-                <div className="space-y-2">
-                  <p className="font-bold text-[#0F172A]">Clinical Verification</p>
-                  <p className="text-[#64748B] leading-relaxed">
-                    This clinical monitoring summary has been generated via verified AES-256 telemetry streams. Scoped under physician supervision.
-                  </p>
-                  <span className="inline-block font-mono text-[10px] text-slate-400 mt-1">
-                    REPORT-SHA256: 8f4a9b2c3d1e...
-                  </span>
-                </div>
-              </div>
-            </Card>
-          </section>
-
-          {/* =======================================================
-              6. CLINICAL ALERTS PANEL (id="alerts")
-             ======================================================= */}
-          <section id="alerts" className="scroll-mt-24 space-y-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-sans text-xl font-bold text-[#0F172A]">Clinical Alerts & Notifications</h3>
-                <p className="text-xs text-[#64748B] mt-0.5">Threshold triggers and vital alarms</p>
-              </div>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-xs font-bold text-[#0284C7]">
-                Live Notification Center
-              </span>
-            </div>
-
-            <AlertsPanel
-              alerts={
-                Array.isArray(alerts) && alerts.length > 0
-                  ? alerts.map((alt, idx) => {
-                      const text = typeof alt === 'string' ? alt : String(alt?.message || alt?.title || alt?.text || 'Telemetry alert');
-                      const lower = text.toLowerCase();
-                      const alertType =
-                        (typeof alt === 'object' && alt?.type)
-                          ? alt.type
-                          : (lower.includes('critical') || lower.includes('emergency')
-                              ? 'critical'
-                              : lower.includes('warning')
-                              ? 'warning'
-                              : 'normal');
-                      return {
-                        code: (typeof alt === 'object' && alt?.code) || `alt-${idx}`,
-                        type: alertType,
-                        title: (typeof alt === 'object' && alt?.title) || text,
-                        description: (typeof alt === 'object' && alt?.description) || message || 'Continuous telemetry threshold evaluated.',
-                        time: (typeof alt === 'object' && alt?.time) || '14:32',
-                      };
-                    })
-                  : [
-                      {
-                        code: 'alt-norm',
-                        type: 'normal',
-                        title: 'Telemetry parameters nominal',
-                        description: 'Pulse, SpO2, and ECG rhythm within normal physiological range.',
-                        time: '14:32',
-                      },
-                      {
-                        code: 'alt-warn',
-                        type: 'warning',
-                        title: 'Minor sensor motion baseline shift',
-                        description: 'Lead II trace calibrated without signal loss.',
-                        time: '14:15',
-                      },
-                    ]
-              }
-            />
-          </section>
+          <ClinicalReportSection
+            currentPatientName={currentPatientName}
+            currentPatientId={currentPatientId}
+            effectiveAge={effectiveAge}
+            effectiveGender={effectiveGender}
+            attendingDoctorName={attendingDoctorName}
+            attendingDoctorSpecialty={attendingDoctorSpecialty}
+            heartRate={heartRate}
+            spo2={spo2}
+            temperature={temperature}
+            bloodPressure="120/80 mmHg"
+            ecgData={ecgData}
+            risk={risk}
+            risk_score={risk_score}
+            currentLastUpdate={currentLastUpdate}
+            onPrint={handlePrintReport}
+            onDownloadPdf={handlePrintReport}
+          />
 
           {/* =======================================================
               7. PATIENTS ROSTER & CARE TEAM (id="patients")
