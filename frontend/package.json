@@ -6,7 +6,7 @@
   "scripts": {
     "start": "vite",
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node -e \"const fs=require('fs'); fs.copyFileSync('dist/index.html', 'dist/404.html'); console.log('✓ Generated dist/404.html for Render SPA routing');\"",
     "preview": "vite preview"
   },
   "dependencies": {
