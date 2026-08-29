@@ -51,3 +51,6 @@ firebase_key.json
 
 # ML Model
 *.pkl
+
+# Scratch scripts
+scratch/

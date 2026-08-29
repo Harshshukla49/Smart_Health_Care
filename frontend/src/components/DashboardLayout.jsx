@@ -43,10 +43,9 @@ export function DashboardLayout({
   };
 
   const isDoctor = currentRole === 'doctor';
-  const workspaceLabel = isDoctor ? 'Clinical Workspace' : 'Personal Health Workspace';
-  const doctorName = session?.name || (isDoctor ? 'Abhishek Rai' : 'Akash Soni');
-  const doctorTitle = isDoctor ? 'Cardiologist' : 'Patient';
-  const initials = (doctorName || (isDoctor ? 'AB' : 'AS')).slice(0, 2).toUpperCase();
+  const doctorName = session?.name || (isDoctor ? 'Physician' : 'Patient');
+  const doctorTitle = isDoctor ? (session?.specialty || 'Attending Physician') : 'Patient';
+  const initials = (doctorName || (isDoctor ? 'MD' : 'PT')).slice(0, 2).toUpperCase();
 
   return (
     <div className="min-h-screen bg-[#F6F9FC] text-[#0F172A] font-sans antialiased p-3 sm:p-5 lg:p-6">

@@ -116,7 +116,8 @@ function DashboardBody({ liveVitals }) {
   const [doctorPhone, setDoctorPhone] = useState('');
   const [showLocationMapModal, setShowLocationMapModal] = useState(false);
 
-  const patientCount = doctorPatients.length || 1;
+  // SECURITY FIX: Real assigned patient count without synthetic fallback
+  const patientCount = doctorPatients.length;
   const preferredChatPatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
   const preferredDevicePatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
 
@@ -345,9 +346,10 @@ function DashboardBody({ liveVitals }) {
     window.print();
   };
 
-  const currentPatientName = patientName || 'Akash Soni';
-  const currentPatientId = patientId || 'PAT-2026-2007';
-  const currentLastUpdate = updatedAt || '2026-04-14 23:36:37';
+  // SECURITY FIX: Remove hardcoded patient fallback; display real assigned patient or clinical empty state
+  const currentPatientName = patientName || (doctorPatients.length > 0 ? doctorPatients[0].name : (isDoctor ? 'No Assigned Patients' : 'Patient'));
+  const currentPatientId = patientId || (doctorPatients.length > 0 ? (doctorPatients[0].patientId || doctorPatients[0].id) : (isDoctor ? 'N/A' : ''));
+  const currentLastUpdate = updatedAt || new Date().toLocaleTimeString();
 
   return (
     <DashboardLayout
@@ -486,7 +488,7 @@ function DashboardBody({ liveVitals }) {
                       Doctor Scope
                     </p>
                     <p className="mt-1.5 font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
-                      {role === 'doctor' ? `${patientCount} Patient${patientCount > 1 ? 's' : ''}` : '1 Patient'}
+                      {role === 'doctor' ? `${patientCount} Patient${patientCount === 1 ? '' : 's'}` : '1 Patient'}
                     </p>
                     <p className="mt-1 text-xs font-medium text-[#64748B]">
                       Cardiology Clinical Ward
@@ -1004,7 +1006,7 @@ function DashboardBody({ liveVitals }) {
                           return (
                             <tr key={pt.id} className="hover:bg-sky-50/30 transition-colors">
                               <td className="px-5 py-3.5 font-bold text-[#0F172A]">
-                                {pt.name || 'Akash Soni'}
+                                {pt.name || 'Unnamed Patient'}
                               </td>
                               <td className="px-5 py-3.5 text-[#64748B] font-mono">{pt.id}</td>
                               <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.heartRate || 72} BPM</td>
@@ -1034,25 +1036,25 @@ function DashboardBody({ liveVitals }) {
                           );
                         })
                       ) : (
-                        <tr className="hover:bg-sky-50/30 transition-colors">
-                          <td className="px-5 py-3.5 font-bold text-[#0F172A]">Akash Soni</td>
-                          <td className="px-5 py-3.5 text-[#64748B] font-mono">{currentPatientId}</td>
-                          <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{heartRate || 72} BPM</td>
-                          <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{spo2 || 98}%</td>
-                          <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{temperature || 36.7}°C</td>
-                          <td className="px-5 py-3.5">
-                            <span className="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                              <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                              Normal
-                            </span>
-                          </td>
-                          <td className="px-5 py-3.5 text-right">
-                            <Link
-                              to={preferredDevicePatientId ? `/patients/${encodeURIComponent(preferredDevicePatientId)}` : (isDoctor ? '/add-patient' : '/dashboard#vitals')}
-                              className="inline-flex items-center gap-1 font-semibold text-[#0284C7] hover:text-[#0369A1]"
-                            >
-                              View <ArrowRight className="h-3.5 w-3.5" />
-                            </Link>
+                        // SECURITY FIX: Clinical empty state for doctors with zero assigned patients
+                        <tr>
+                          <td colSpan="7" className="px-5 py-10 text-center">
+                            <div className="flex flex-col items-center justify-center gap-2.5">
+                              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-[#64748B]">
+                                <Users className="h-6 w-6" />
+                              </div>
+                              <p className="text-sm font-bold text-[#0F172A]">No Patients Assigned Under Your Care</p>
+                              <p className="text-xs text-[#64748B] max-w-md">
+                                Your clinical ward currently has zero assigned patients. When patients are onboarded under your doctor ID, they will appear here automatically.
+                              </p>
+                              <Link
+                                to="/add-patient"
+                                className="mt-2 inline-flex items-center gap-1.5 rounded-xl bg-[#0284C7] px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-[#0369A1] transition-all"
+                              >
+                                <Plus className="h-4 w-4" />
+                                Onboard New Patient
+                              </Link>
+                            </div>
                           </td>
                         </tr>
                       )}

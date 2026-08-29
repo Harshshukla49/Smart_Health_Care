@@ -72,8 +72,8 @@ export function VideoCallProvider({ children }) {
   const session = getAuthSession();
   const userRole = normalizeRole(session?.role);
   const isDoctor = userRole === 'doctor';
-  const currentUserId = isDoctor ? (session?.email || 'abhishek@gmail.com') : (session?.patientId || 'pat-2026-2007');
-  const currentUserName = session?.name || (isDoctor ? 'Dr. Abhishek Rai' : 'Akash Soni');
+  const currentUserId = isDoctor ? (session?.email || session?.doctorId || '') : (session?.patientId || '');
+  const currentUserName = session?.name || (isDoctor ? 'Doctor' : 'Patient');
 
   // Modal & Call States
   const [isDialerOpen, setIsDialerOpen] = useState(false);
@@ -344,8 +344,8 @@ export function VideoCallProvider({ children }) {
       callerName: currentUserName,
       callerRole: userRole,
       callerPhone: '+91 86018 45515',
-      patientId: isDoctor ? 'PAT-2026-2007' : currentUserId,
-      patientName: isDoctor ? 'Akash Soni' : currentUserName,
+      patientId: isDoctor ? (targetDoctor.patientId || targetDoctor.id || '') : currentUserId,
+      patientName: isDoctor ? (targetDoctor.patientName || targetDoctor.name || 'Patient') : currentUserName,
       recipientId: targetDoctor.id || targetDoctor.email || 'DOC-4B-01',
       recipientName: targetDoctor.name || 'Dr. Abhishek Rai',
       recipientTitle: targetDoctor.title || 'Cardiologist',

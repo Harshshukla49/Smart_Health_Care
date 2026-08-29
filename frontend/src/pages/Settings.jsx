@@ -45,8 +45,8 @@ export function Settings() {
   const [activeTab, setActiveTab] = useState('account');
 
   // Account State
-  const [name, setName] = useState(session?.name || (isDoctor ? 'Dr. Abhishek Rai' : 'Akash Soni'));
-  const [email, setEmail] = useState(session?.email || (isDoctor ? 'abhishek@gmail.com' : 'akash.soni@email.com'));
+  const [name, setName] = useState(session?.name || (isDoctor ? 'Doctor' : 'Patient'));
+  const [email, setEmail] = useState(session?.email || (isDoctor ? 'doctor@hospital.org' : 'patient@hospital.org'));
   const [phone, setPhone] = useState(session?.phone || '+91 98765 43210');
   const [savingAccount, setSavingAccount] = useState(false);
 

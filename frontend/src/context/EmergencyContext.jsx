@@ -29,8 +29,9 @@ export function EmergencyProvider({ children, vitalsContext }) {
   const session = getAuthSession();
   const role = normalizeRole(session?.role);
   const isDoctor = role === 'doctor';
-  const patientId = session?.patientId || 'pat-2026-2007';
-  const patientName = session?.name || (isDoctor ? 'Dr. Abhishek Rai' : 'Akash Soni');
+  // SECURITY FIX: Strictly use authenticated session credentials without hardcoded fallbacks
+  const patientId = session?.patientId || '';
+  const patientName = session?.name || '';
 
   // Location State
   const [location, setLocation] = useState(null);
@@ -281,7 +282,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
         },
         location: currentCoords,
         sosContact,
-        doctorId: session?.doctorId || 'abhishek@gmail.com',
+        doctorId: session?.assignedDoctorId || session?.doctorId || session?.doctorEmail || '',
         isDemo,
         createdAt: new Date().toISOString(),
         auditLog: [
@@ -303,7 +304,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
             timestamp: new Date().toISOString(),
             actor: 'alert_service',
             action: 'DOCTOR_AND_SOS_NOTIFIED',
-            details: `Alert queued for Dr. Abhishek Rai & Contact ${sosContact.phone}`,
+            details: `Alert dispatched to assigned physician & Contact ${sosContact.phone}`,
           },
         ],
       };

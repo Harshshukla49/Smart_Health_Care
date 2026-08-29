@@ -110,10 +110,10 @@ export function DoctorEmergencyCenter() {
                           CRITICAL EMERGENCY
                         </span>
                         <h4 className="font-sans text-base sm:text-lg font-bold text-[#0F172A] truncate">
-                          {alert.patientName || 'Akash Soni'}
+                          {alert.patientName || alert.patientId || 'Patient'}
                         </h4>
                         <span className="text-xs text-[#64748B] font-medium">
-                          ID: {alert.patientId || 'PAT-2026-2007'}
+                          ID: {alert.patientId || 'N/A'}
                         </span>
                       </div>
 
@@ -156,7 +156,7 @@ export function DoctorEmergencyCenter() {
 
                       {/* Call Patient Button (neutral white/gray) */}
                       <a
-                        href="tel:+918601845515"
+                        href={alert.sosContact?.phone ? `tel:${alert.sosContact.phone}` : 'tel:+918601845515'}
                         className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E2E8F0] bg-white px-3.5 py-2 text-xs font-semibold text-[#0F172A] shadow-2xs hover:bg-slate-50 transition"
                       >
                         <Phone className="h-4 w-4 text-[#64748B]" />
@@ -168,11 +168,11 @@ export function DoctorEmergencyCenter() {
                         type="button"
                         onClick={() => {
                           startCall({
-                            id: alert.patientId || 'PAT-2026-2007',
-                            name: alert.patientName || 'Akash Soni',
-                            title: 'Ward 4B Monitored Patient',
+                            id: alert.patientId || 'N/A',
+                            name: alert.patientName || alert.patientId || 'Patient',
+                            title: 'Ward Monitored Patient',
                             department: 'Critical Care Telemetry',
-                            phone: '+91 86018 45515',
+                            phone: alert.sosContact?.phone || '',
                             extension: '201',
                             isAssigned: true,
                           });

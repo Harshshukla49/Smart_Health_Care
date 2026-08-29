@@ -268,11 +268,11 @@ export function Sidebar({
   }, [mobileOpen, onClose]);
 
   const userName =
-    activeSession?.name || (isDoctor ? 'Abhishek Rai' : 'Akash Soni');
-  const userRoleTitle = isDoctor ? 'Cardiologist' : 'Patient';
+    activeSession?.name || (isDoctor ? 'Physician' : 'Patient');
+  const userRoleTitle = isDoctor ? (activeSession?.specialty || 'Attending Physician') : 'Patient';
   const userEmail =
-    activeSession?.email || (isDoctor ? 'abhishek@gmail.com' : 'akash.soni@email.com');
-  const userInitials = (userName || (isDoctor ? 'AB' : 'AS')).slice(0, 2).toUpperCase();
+    activeSession?.email || (isDoctor ? 'doctor@hospital.org' : 'patient@hospital.org');
+  const userInitials = (userName || (isDoctor ? 'MD' : 'PT')).slice(0, 2).toUpperCase();
 
   return (
     <>

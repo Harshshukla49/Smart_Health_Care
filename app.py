@@ -48,10 +48,25 @@ def require_auth(roles=None, patient_id_arg=None):
 # (All imports and app = Flask(__name__) ...)
 # ...existing code...
 
-# ========== Route and validation functions (must be after app = Flask(__name__)) ========== #
+# SECURITY FIX: Strict doctor-patient authorization check
 def _doctor_owns_record(record, doctor_id):
-    # Doctor owns patient if patient['doctorId'] matches doctor_id (email)
-    return str(record.get('doctorId', '')).strip().lower() == str(doctor_id).strip().lower()
+    if not isinstance(record, dict) or not doctor_id:
+        return False
+    doc_id_str = str(doctor_id).strip().lower()
+    assigned = str(record.get('assignedDoctorId') or '').strip().lower()
+    doc_id = str(record.get('doctorId') or '').strip().lower()
+    doc_email = str(record.get('doctorEmail') or '').strip().lower()
+
+    contact_email = ''
+    if isinstance(record.get('doctorContact'), dict):
+        contact_email = str(record.get('doctorContact', {}).get('email') or '').strip().lower()
+
+    return doc_id_str != '' and (
+        doc_id_str == assigned or
+        doc_id_str == doc_id or
+        doc_id_str == doc_email or
+        doc_id_str == contact_email
+    )
 
 def _validate_patient_payload(data):
     errors = []
@@ -111,6 +126,8 @@ def add_patient(doctor_id):
         'phone': _normalize_phone(data['phone']),
         'email': data['email'].strip().lower(),
         'doctorId': requester_doctor_id,
+        'assignedDoctorId': requester_doctor_id,
+        'doctorEmail': requester_doctor_id,
         'createdAt': now,
         'updatedAt': now,
         'medicines': [],
@@ -1220,11 +1237,13 @@ def _request_patient_id():
 
 def _request_doctor_id(payload=None):
     auth_payload = _read_auth_payload()
-    if auth_payload.get('role') == 'doctor' and auth_payload.get('email'):
-        return str(auth_payload.get('email')).strip().lower()
+    if auth_payload.get('role') == 'doctor':
+        doc_id = auth_payload.get('doctorId') or auth_payload.get('email') or auth_payload.get('uid')
+        if doc_id:
+            return str(doc_id).strip().lower()
 
     if isinstance(payload, dict):
-        from_payload = payload.get('doctorId') or payload.get('doctorEmail')
+        from_payload = payload.get('doctorId') or payload.get('doctorEmail') or payload.get('assignedDoctorId')
         if from_payload:
             return str(from_payload).strip().lower()
 
@@ -1266,7 +1285,7 @@ def require_auth(roles=None, patient_id_arg=None):
                         return api_error('Access denied for this patient record.', 403)
 
                 if role == 'doctor':
-                    doctor_id = str(payload.get('email') or '').strip().lower()
+                    doctor_id = str(payload.get('doctorId') or payload.get('email') or payload.get('uid') or '').strip().lower()
                     if not doctor_id:
                         return api_error('Forbidden. Doctor context is missing from token.', 403)
 
@@ -2573,38 +2592,70 @@ def send_email_alert(prediction, hr, spo2, temp):
 def home():
     return jsonify({"status": "ok", "message": "Smart Healthcare Backend Running"})
 
+# SECURITY FIX: Strict authentication and doctor-patient isolation on /real-data
 @app.route('/real-data', methods=['GET'])
 def get_real_data():
     try:
-        raw_data = _patient_collection_reference().get() or {}
-        doctor_role = _request_user_role() == 'doctor'
-        doctor_id = _request_doctor_id()
-
-        if doctor_role and not doctor_id:
+        role = _request_user_role()
+        if not role:
             return jsonify({
                 "status": "error",
-                "message": "Doctor identity is required."
-            }), 400
+                "message": "Unauthorized. Valid auth token is required."
+            }), 401
 
-        if isinstance(raw_data, dict):
-            data = {
-                patient_id: _sanitize_patient_response(record)
-                for patient_id, record in raw_data.items()
-                if record and (not doctor_role or _doctor_owns_record(record, doctor_id))
-            }
-        elif isinstance(raw_data, list):
-            data = [
-                _sanitize_patient_response(record)
-                for record in raw_data
-                if record and (not doctor_role or _doctor_owns_record(record, doctor_id))
-            ]
-        else:
-            data = {}
+        raw_data = _patient_collection_reference().get() or {}
+
+        if role == 'doctor':
+            doctor_id = _request_doctor_id()
+            if not doctor_id:
+                return jsonify({
+                    "status": "error",
+                    "message": "Doctor identity is required."
+                }), 400
+
+            if isinstance(raw_data, dict):
+                data = {
+                    patient_id: _sanitize_patient_response(record)
+                    for patient_id, record in raw_data.items()
+                    if record and _doctor_owns_record(record, doctor_id)
+                }
+            elif isinstance(raw_data, list):
+                data = [
+                    _sanitize_patient_response(record)
+                    for record in raw_data
+                    if record and _doctor_owns_record(record, doctor_id)
+                ]
+            else:
+                data = {}
+
+            return jsonify({
+                "status": "success",
+                "data": data
+            })
+
+        if role == 'patient':
+            patient_id = _request_patient_id()
+            if not patient_id:
+                return jsonify({
+                    "status": "error",
+                    "message": "Patient identity is required."
+                }), 400
+
+            record = _patient_collection_reference().child(patient_id).get()
+            if record and isinstance(record, dict):
+                data = {patient_id: _sanitize_patient_response(record)}
+            else:
+                data = {}
+
+            return jsonify({
+                "status": "success",
+                "data": data
+            })
 
         return jsonify({
-            "status": "success",
-            "data": data
-        })
+            "status": "error",
+            "message": "Forbidden. Role not authorized."
+        }), 403
     except Exception as e:
         return jsonify({
             "status": "error",
@@ -2612,11 +2663,17 @@ def get_real_data():
         }), 500
 
 
+# SECURITY FIX: Strict authentication and doctor-patient isolation on /patients
 @app.route('/patients', methods=['GET'])
 def get_patients():
-    patients = _read_patient_records()
+    role = _request_user_role()
+    if not role:
+        return jsonify({
+            'status': 'error',
+            'message': 'Unauthorized. Valid auth token is required.',
+        }), 401
 
-    if _request_user_role() == 'doctor':
+    if role == 'doctor':
         doctor_id = _request_doctor_id()
         if not doctor_id:
             return jsonify({
@@ -2624,12 +2681,38 @@ def get_patients():
                 'message': 'Doctor identity is required.',
             }), 400
 
-        patients = [patient for patient in patients if _doctor_owns_record(patient, doctor_id)]
+        all_patients = _read_patient_records()
+        assigned_patients = [patient for patient in all_patients if _doctor_owns_record(patient, doctor_id)]
+        return jsonify({
+            'status': 'success',
+            'patients': [_sanitize_patient_response(patient) for patient in assigned_patients],
+        })
+
+    if role == 'patient':
+        patient_id = _request_patient_id()
+        if not patient_id:
+            return jsonify({
+                'status': 'error',
+                'message': 'Patient identity is required.',
+            }), 400
+
+        record = _patient_collection_reference().child(patient_id).get()
+        if not record or not isinstance(record, dict):
+            return jsonify({
+                'status': 'success',
+                'patients': [],
+            })
+
+        normalized = _normalize_patient_record(patient_id, record, record)
+        return jsonify({
+            'status': 'success',
+            'patients': [_sanitize_patient_response(normalized)],
+        })
 
     return jsonify({
-        'status': 'success',
-        'patients': [_sanitize_patient_response(patient) for patient in patients],
-    })
+        'status': 'error',
+        'message': 'Forbidden. Role not authorized.',
+    }), 403
 
 
 @app.route('/add-patient', methods=['POST'])
@@ -2664,6 +2747,7 @@ def add_patient_legacy():
             }), 400
         payload['doctorId'] = doctor_id
         payload['doctorEmail'] = doctor_id
+        payload['assignedDoctorId'] = doctor_id
         payload['doctorPhone'] = doctor_phone
 
         required_fields = ['name', 'age', 'gender', 'phone', 'email', 'symptoms']
@@ -2917,7 +3001,9 @@ def manual_update_patient(patient_id):
         return api_error(str(error), 500)
 
 
+# SECURITY FIX: Restrict device connection to assigned doctor
 @app.route('/connect-device/<patient_id>', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
 def connect_device(patient_id):
     try:
         key = str(patient_id or '').strip()
@@ -2950,7 +3036,9 @@ def connect_device(patient_id):
         return jsonify({'status': 'error', 'message': str(error)}), 500
 
 
+# SECURITY FIX: Restrict device disconnection to assigned doctor
 @app.route('/disconnect-device/<patient_id>', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
 def disconnect_device(patient_id):
     try:
         key = str(patient_id or '').strip()
@@ -2987,7 +3075,9 @@ def disconnect_device(patient_id):
         return jsonify({'status': 'error', 'message': str(error)}), 500
 
 
+# SECURITY FIX: Protect prediction-audit with doctor and patient ownership check
 @app.route('/api/patient/<patient_id>/prediction-audit', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
 def get_patient_prediction_audit(patient_id):
     try:
         key = str(patient_id or '').strip()
@@ -3012,6 +3102,7 @@ def get_patient_prediction_audit(patient_id):
         return api_error(str(error), 500)
 
 
+# SECURITY FIX: Strict authentication and doctor-patient isolation on /api/vitals/<patient_id>
 @app.route('/api/vitals/<patient_id>', methods=['GET'])
 def get_patient_vitals(patient_id):
     try:
@@ -3022,48 +3113,50 @@ def get_patient_vitals(patient_id):
                 'message': 'Patient ID is required.',
             }), 400
 
-        record = _patient_collection_reference().child(key).get()
-        if record:
-            if _request_user_role() == 'patient':
-                requester_patient_id = _request_patient_id()
-                if not requester_patient_id or str(requester_patient_id) != str(key):
-                    return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
-
-            normalized = _normalize_patient_record(key, record, record)
-            prediction = normalized.get('prediction') if isinstance(normalized.get('prediction'), dict) else {}
-            ecg_data = _sanitize_ecg_samples(
-                (normalized.get('vitals') or {}).get('ecgData')
-                or normalized.get('ecgData')
-            )
+        role = _request_user_role()
+        if not role:
             return jsonify({
-                'status': 'success',
-                'data': {
-                    'patientId': key,
-                    'heartRate': _coerce_float((normalized.get('vitals') or {}).get('heartRate') or normalized.get('heartRate')),
-                    'spo2': _coerce_float((normalized.get('vitals') or {}).get('spo2') or normalized.get('spo2')),
-                    'temperature': _coerce_float((normalized.get('vitals') or {}).get('temperature') or normalized.get('temperature')),
-                    'ecgData': ecg_data,
-                    'updatedAt': normalized.get('updatedAt') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    'prediction': prediction,
-                    'risk': prediction.get('risk', ''),
-                    'confidence': _coerce_float(prediction.get('confidence'), 0.0),
-                    'message': prediction.get('message', ''),
-                }
-            })
+                'status': 'error',
+                'message': 'Unauthorized. Authentication token is required.',
+            }), 401
 
-        dataset_vitals = _pick_dataset_vitals_row()
+        record = _patient_collection_reference().child(key).get()
+        if not record or not isinstance(record, dict):
+            return jsonify({
+                'status': 'error',
+                'message': 'Patient not found.',
+            }), 404
 
+        if role == 'patient':
+            requester_patient_id = _request_patient_id()
+            if not requester_patient_id or str(requester_patient_id) != str(key):
+                return jsonify({'status': 'error', 'message': 'Access denied for this patient record.'}), 403
+
+        if role == 'doctor':
+            doctor_id = _request_doctor_id()
+            if not doctor_id or not _doctor_owns_record(record, doctor_id):
+                return jsonify({'status': 'error', 'message': 'Access denied. You are not assigned to this patient.'}), 403
+
+        normalized = _normalize_patient_record(key, record, record)
+        prediction = normalized.get('prediction') if isinstance(normalized.get('prediction'), dict) else {}
+        ecg_data = _sanitize_ecg_samples(
+            (normalized.get('vitals') or {}).get('ecgData')
+            or normalized.get('ecgData')
+        )
         return jsonify({
             'status': 'success',
             'data': {
                 'patientId': key,
-                'heartRate': float(dataset_vitals['heart_rate']),
-                'spo2': float(dataset_vitals['spo2']),
-                'temperature': float(dataset_vitals['temperature']),
-                'ecgData': [],
-                'updatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-            },
-            'source': 'dataset'
+                'heartRate': _coerce_float((normalized.get('vitals') or {}).get('heartRate') or normalized.get('heartRate')),
+                'spo2': _coerce_float((normalized.get('vitals') or {}).get('spo2') or normalized.get('spo2')),
+                'temperature': _coerce_float((normalized.get('vitals') or {}).get('temperature') or normalized.get('temperature')),
+                'ecgData': ecg_data,
+                'updatedAt': normalized.get('updatedAt') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'prediction': prediction,
+                'risk': prediction.get('risk', ''),
+                'confidence': _coerce_float(prediction.get('confidence'), 0.0),
+                'message': prediction.get('message', ''),
+            }
         })
     except Exception as error:
         return jsonify({
@@ -3165,7 +3258,9 @@ def predict():
         return jsonify({"status": "error", "error": "Prediction failed", "message": str(e), "traceback": traceback.format_exc()}), 500
 
 
+# SECURITY FIX: Protect /patient/<patient_id>/monitor with role and patient ownership check
 @app.route('/patient/<patient_id>/monitor', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
 def monitor_patient(patient_id):
     try:
         key = str(patient_id or '').strip()
@@ -4116,19 +4211,34 @@ def live_vitals():
 # 🚨 EMERGENCY RESPONSE & AMBULANCE DISPATCH SYSTEM
 # ============================================================================
 
+# SECURITY FIX: Dynamically resolve assigned doctor and enforce isolation in emergency_trigger
 @app.route("/api/emergency/trigger", methods=["POST"])
 def emergency_trigger():
     try:
         data = request.get_json(silent=True) or {}
         alert_id = str(data.get("alertId") or f"emg-{int(time.time() * 1000)}").strip()
-        patient_id = str(data.get("patientId") or "pat-2026-2007").strip()
-        patient_name = str(data.get("patientName") or "Patient").strip()
+        patient_id = str(data.get("patientId") or "").strip()
+        patient_name = str(data.get("patientName") or "").strip()
         trigger_reason = str(data.get("triggerReason") or "Critical vital thresholds breached").strip()
         vitals = data.get("vitals") or {}
         location = data.get("location") or {}
-        doctor_id = str(data.get("doctorId") or "abhishek@gmail.com").strip().lower()
+        doctor_id = str(data.get("doctorId") or "").strip().lower()
         sos_contact = data.get("sosContact") or {}
         is_demo = bool(data.get("isDemo", False))
+
+        # Dynamically lookup patient from RTDB to ensure genuine assignment
+        if patient_id:
+            patient_record = _patient_collection_reference().child(patient_id).get()
+            if isinstance(patient_record, dict):
+                patient_name = patient_record.get('name') or patient_name or "Patient"
+                assigned_doc = str(patient_record.get('assignedDoctorId') or patient_record.get('doctorId') or patient_record.get('doctorEmail') or '').strip().lower()
+                if assigned_doc:
+                    doctor_id = assigned_doc
+
+        if not patient_name:
+            patient_name = "Patient"
+        if not doctor_id:
+            doctor_id = "general-triage"
 
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -4141,6 +4251,7 @@ def emergency_trigger():
             "vitals": vitals,
             "location": location,
             "doctorId": doctor_id,
+            "assignedDoctorId": doctor_id,
             "sosContact": sos_contact,
             "ambulanceStatus": "NOT_REQUESTED",
             "isDemo": is_demo,
@@ -4178,7 +4289,8 @@ def emergency_trigger():
         # 2. Store in Realtime Database
         try:
             db.reference(f"emergencyAlerts/{alert_id}").set(alert_record)
-            db.reference(f"patients/{patient_id}/activeEmergency").set(alert_record)
+            if patient_id:
+                db.reference(f"patients/{patient_id}/activeEmergency").set(alert_record)
         except Exception as rtdb_err:
             print("[Emergency] RTDB write warning:", rtdb_err)
 
@@ -4217,9 +4329,14 @@ def emergency_trigger():
         return jsonify({"status": "error", "message": str(err)}), 500
 
 
+# SECURITY FIX: Strict authentication and doctor-patient isolation on /api/emergency/active
 @app.route("/api/emergency/active", methods=["GET"])
 def emergency_get_active():
     try:
+        role = _request_user_role()
+        if not role:
+            return jsonify({"status": "error", "message": "Unauthorized. Authentication token is required."}), 401
+
         emergencies = []
 
         # Try fetching from RTDB
@@ -4237,27 +4354,92 @@ def emergency_get_active():
             try:
                 docs = firestore_client.collection("emergencyAlerts").where("status", "!=", "RESOLVED").stream()
                 for doc in docs:
-                    emergencies.append(doc.to_dict())
+                    d = doc.to_dict()
+                    if d.get("status") not in ("RESOLVED", "CANCELLED"):
+                        emergencies.append(d)
             except Exception as fs_err:
                 print(f"[Emergency] Firestore query warning: {fs_err}")
 
-        return jsonify({
-            "status": "success",
-            "emergencies": emergencies
-        })
+        # DOCTOR SCOPING: Only emergencies for patients assigned to this doctor
+        if role == 'doctor':
+            doctor_id = _request_doctor_id()
+            if not doctor_id:
+                return jsonify({"status": "error", "message": "Doctor identity required."}), 400
+
+            authorized_emergencies = []
+            patient_ref = _patient_collection_reference()
+            for emg in emergencies:
+                emg_doc = str(emg.get('assignedDoctorId') or emg.get('doctorId') or '').strip().lower()
+                emg_pid = str(emg.get('patientId') or '').strip()
+                if emg_doc == doctor_id:
+                    authorized_emergencies.append(emg)
+                elif emg_pid:
+                    precord = patient_ref.child(emg_pid).get()
+                    if isinstance(precord, dict) and _doctor_owns_record(precord, doctor_id):
+                        authorized_emergencies.append(emg)
+
+            return jsonify({
+                "status": "success",
+                "emergencies": authorized_emergencies
+            })
+
+        # PATIENT SCOPING: Only the patient's own emergencies
+        if role == 'patient':
+            patient_id = _request_patient_id()
+            if not patient_id:
+                return jsonify({"status": "error", "message": "Patient identity required."}), 400
+
+            patient_emergencies = [
+                emg for emg in emergencies
+                if str(emg.get('patientId') or '').strip().lower() == str(patient_id).strip().lower()
+            ]
+            return jsonify({
+                "status": "success",
+                "emergencies": patient_emergencies
+            })
+
+        return jsonify({"status": "error", "message": "Forbidden. Role not authorized."}), 403
     except Exception as err:
         return jsonify({"status": "error", "message": str(err)}), 500
 
 
+# SECURITY FIX: Authorize alert status change (assigned doctor or affected patient only)
 @app.route("/api/emergency/<alert_id>/status", methods=["POST"])
 def emergency_update_status(alert_id):
     try:
+        role = _request_user_role()
+        if not role:
+            return jsonify({"status": "error", "message": "Unauthorized. Authentication token is required."}), 401
+
         data = request.get_json(silent=True) or {}
         new_status = str(data.get("status") or "EMERGENCY_ACKNOWLEDGED").strip()
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         payload = _read_auth_payload()
         actor = payload.get("email") or payload.get("role") or "doctor"
+
+        rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
+        existing = rtdb_ref.get() or {}
+        if not existing and firestore_client:
+            fdoc = firestore_client.collection("emergencyAlerts").document(alert_id).get()
+            if fdoc.exists:
+                existing = fdoc.to_dict()
+
+        if not existing or not isinstance(existing, dict):
+            return jsonify({"status": "error", "message": "Alert not found."}), 404
+
+        emg_doc = str(existing.get('assignedDoctorId') or existing.get('doctorId') or '').strip().lower()
+        emg_pid = str(existing.get('patientId') or '').strip()
+
+        if role == 'doctor':
+            doctor_id = _request_doctor_id()
+            precord = _patient_collection_reference().child(emg_pid).get() if emg_pid else {}
+            if emg_doc != doctor_id and not (isinstance(precord, dict) and _doctor_owns_record(precord, doctor_id)):
+                return jsonify({"status": "error", "message": "Forbidden. You are not assigned to this patient's emergency."}), 403
+        elif role == 'patient':
+            patient_id = _request_patient_id()
+            if emg_pid != patient_id:
+                return jsonify({"status": "error", "message": "Forbidden. Access denied for this alert."}), 403
 
         audit_entry = {
             "timestamp": now_iso,
@@ -4268,8 +4450,6 @@ def emergency_update_status(alert_id):
 
         # Update in RTDB
         try:
-            rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
-            existing = rtdb_ref.get() or {}
             audit_log = existing.get("auditLog", []) if isinstance(existing, dict) else []
             audit_log.append(audit_entry)
             rtdb_ref.update({
@@ -4374,22 +4554,37 @@ def emergency_ambulance_request():
         return jsonify({"status": "error", "message": str(err)}), 500
 
 
+# SECURITY FIX: Authorize audit retrieval (assigned doctor or affected patient only)
 @app.route("/api/emergency/<alert_id>/audit", methods=["GET"])
 def emergency_get_audit(alert_id):
     try:
-        audit_log = []
-        try:
-            record = db.reference(f"emergencyAlerts/{alert_id}").get()
-            if isinstance(record, dict):
-                audit_log = record.get("auditLog", [])
-        except Exception:
-            pass
+        role = _request_user_role()
+        if not role:
+            return jsonify({"status": "error", "message": "Unauthorized. Authentication token is required."}), 401
 
-        if not audit_log and firestore_client:
-            doc = firestore_client.collection("emergencyAlerts").document(alert_id).get()
-            if doc.exists:
-                audit_log = doc.to_dict().get("auditLog", [])
+        record = db.reference(f"emergencyAlerts/{alert_id}").get()
+        if not record and firestore_client:
+            fdoc = firestore_client.collection("emergencyAlerts").document(alert_id).get()
+            if fdoc.exists:
+                record = fdoc.to_dict()
 
+        if not record or not isinstance(record, dict):
+            return jsonify({"status": "error", "message": "Alert not found."}), 404
+
+        emg_doc = str(record.get('assignedDoctorId') or record.get('doctorId') or '').strip().lower()
+        emg_pid = str(record.get('patientId') or '').strip()
+
+        if role == 'doctor':
+            doctor_id = _request_doctor_id()
+            precord = _patient_collection_reference().child(emg_pid).get() if emg_pid else {}
+            if emg_doc != doctor_id and not (isinstance(precord, dict) and _doctor_owns_record(precord, doctor_id)):
+                return jsonify({"status": "error", "message": "Forbidden. You are not assigned to this emergency."}), 403
+        elif role == 'patient':
+            patient_id = _request_patient_id()
+            if emg_pid != patient_id:
+                return jsonify({"status": "error", "message": "Forbidden. Access denied for this alert audit."}), 403
+
+        audit_log = record.get("auditLog", [])
         return jsonify({
             "status": "success",
             "alertId": alert_id,

@@ -19,7 +19,7 @@ export function EmergencyMap({
   latitude,
   longitude,
   accuracy = 12,
-  patientName = 'Akash Soni',
+  patientName = 'Patient',
   status = 'CRITICAL',
   lastUpdated = 'Just now',
   nearbyFacilities = [],

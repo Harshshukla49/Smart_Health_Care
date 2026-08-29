@@ -270,7 +270,7 @@ export function EmergencyBannerModal() {
                   latitude={coords.latitude}
                   longitude={coords.longitude}
                   accuracy={coords.accuracy}
-                  patientName={activeEmergency?.patientName || 'Akash Soni'}
+                  patientName={activeEmergency?.patientName || activeEmergency?.patientId || 'Patient'}
                   status="CRITICAL"
                   lastUpdated="Just now"
                 />

@@ -6,11 +6,49 @@
         ".write": "auth != null && auth.uid === $uid"
       }
     },
+    "patient": {
+      "$patientId": {
+        ".read": "auth != null && (auth.uid === $patientId || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val() || auth.token.email === data.child('doctorEmail').val() || auth.token.email === data.child('email').val())",
+        ".write": "auth != null && (!data.exists() || auth.uid === $patientId || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val())"
+      }
+    },
     "patients": {
       "$patientId": {
-        ".read": "auth != null && data.child('ownerId').val() === auth.uid",
-        ".write": "auth != null && (!data.exists() || data.child('ownerId').val() === auth.uid)"
+        ".read": "auth != null && (auth.uid === $patientId || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val() || auth.token.email === data.child('email').val() || auth.uid === data.child('ownerId').val())",
+        ".write": "auth != null && (!data.exists() || auth.uid === $patientId || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val() || auth.uid === data.child('ownerId').val())"
       }
+    },
+    "doctor": {
+      "$doctorId": {
+        ".read": "auth != null && (auth.uid === $doctorId || auth.token.email === data.child('email').val() || root.child('patient').child(auth.uid).child('doctorId').val() === data.child('email').val() || root.child('patient').child(auth.uid).child('assignedDoctorId').val() === $doctorId)",
+        ".write": "auth != null && (auth.uid === $doctorId || auth.token.email === data.child('email').val())"
+      }
+    },
+    "emergencyAlerts": {
+      "$alertId": {
+        ".read": "auth != null && (auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val() || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('patientId').val() || auth.token.email === data.child('patientEmail').val())",
+        ".write": "auth != null && (!data.exists() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val() || auth.uid === data.child('assignedDoctorId').val() || auth.uid === data.child('patientId').val())"
+      }
+    },
+    "chat_threads": {
+      "$threadId": {
+        ".read": "auth != null && (auth.uid === data.child('patientId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val())",
+        ".write": "auth != null && (auth.uid === data.child('patientId').val() || auth.uid === data.child('doctorId').val() || auth.token.email === data.child('doctorId').val())"
+      }
+    },
+    "chat_presence": {
+      "$userId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (auth.uid === $userId || auth.token.email === $userId)"
+      }
+    },
+    "password_reset_otps": {
+      ".read": false,
+      ".write": false
+    },
+    "password_resets": {
+      ".read": false,
+      ".write": false
     }
   }
 }

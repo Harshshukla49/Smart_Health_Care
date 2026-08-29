@@ -136,8 +136,6 @@ export function LiveVitalsProvider({ children }) {
 
     setVitals((current) => ({
       ...nextVitals,
-      // Some realtime vital events contain only readings. Keep the last model
-      // result until the backend sends a newer prediction alongside them.
       risk: nextVitals.risk || current.risk,
       risk_score: nextVitals.risk_score ?? current.risk_score,
       confidence: nextVitals.confidence ?? current.confidence,
@@ -176,6 +174,7 @@ export function LiveVitalsProvider({ children }) {
     [applyIncomingState]
   );
 
+  // SECURITY FIX: Context initialization respecting doctor and patient role scoping
   useEffect(() => {
     let active = true;
 
@@ -187,6 +186,7 @@ export function LiveVitalsProvider({ children }) {
         const session = getAuthSession();
         const role = session?.role;
 
+        // Patient: Strictly resolve own profile
         if (role === 'patient' && session?.patientId) {
           const profile = await getApiPatientById(session.patientId);
           if (!active) {
@@ -207,6 +207,7 @@ export function LiveVitalsProvider({ children }) {
           return;
         }
 
+        // Doctor: Fetch only doctor's assigned patients
         const patients = await getPatients();
         if (!active) {
           return;
@@ -214,8 +215,11 @@ export function LiveVitalsProvider({ children }) {
 
         const firstPatient = Array.isArray(patients) && patients.length ? patients[0] : null;
 
+        // If doctor has NO assigned patients, do NOT fall back to Akash Soni or demo data
         if (!firstPatient?.id) {
-          setError('No patient data available yet. Add a patient to begin live monitoring.');
+          setPatientId('');
+          setPatientName('');
+          setError('No assigned patients under your care yet. Add a patient to begin live monitoring.');
           return;
         }
 

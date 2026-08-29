@@ -98,7 +98,7 @@ export function AmbulanceRequestModal({ isOpen, onClose }) {
               <div className="flex items-center justify-between">
                 <span className="text-slate-500 font-medium">Patient:</span>
                 <span className="font-bold text-slate-900">
-                  {activeEmergency?.patientName || 'Akash Soni'} (ID: {activeEmergency?.patientId || 'PAT-2026-2007'})
+                  {activeEmergency?.patientName || activeEmergency?.patientId || 'Patient'} {activeEmergency?.patientId ? `(ID: ${activeEmergency.patientId})` : ''}
                 </span>
               </div>
 

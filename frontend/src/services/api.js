@@ -285,42 +285,63 @@ const buildPatientAccountPayload = ({
   ecgData: toEcgArray(ecgData),
 });
 
+// SECURITY FIX: Enforce strict doctor-patient isolation and avoid mock fallbacks
 export const getPatients = async () => {
+  const session = getAuthSession();
   try {
     const response = await api.get('/patients');
     const patients = extractPatientArray(unwrapEnvelope(response));
-
     const normalizedPatients = patients.map(normalizePatient);
     writeLocalPatients(normalizedPatients);
     return normalizedPatients;
-  } catch {
-    // Try alternate backend shape before falling back to cached or demo data.
+  } catch (err) {
+    if (err?.response?.status === 401 || err?.response?.status === 403) {
+      return [];
+    }
   }
 
-  try {
-    const response = await api.get('/real-data');
-    const patients = extractPatientArray(unwrapEnvelope(response));
+  // Doctor session: Only return locally cached patients that strictly belong to this doctor
+  if (session?.role === 'doctor') {
+    const localPatients = readLocalPatients().map(normalizePatient);
+    const docId = String(session.email || session.doctorId || '').trim().toLowerCase();
+    return localPatients.filter(
+      (p) => String(p.doctorId || p.doctorEmail || p.assignedDoctorId || '').trim().toLowerCase() === docId
+    );
+  }
 
-    if (patients.length > 0) {
-      const normalizedPatients = patients.map(normalizePatient);
-      writeLocalPatients(normalizedPatients);
-      return normalizedPatients;
+  // Patient session: Only return locally cached patient matching session ID
+  if (session?.role === 'patient') {
+    const localPatients = readLocalPatients().map(normalizePatient);
+    return localPatients.filter((p) => String(p.id || p.patientId) === String(session.patientId));
+  }
+
+  return [];
+};
+
+// SECURITY FIX: Fetch specific patient directly through authorized endpoint
+export const getPatientById = async (patientId) => {
+  if (!patientId) return null;
+  try {
+    const response = await api.get(`/api/patient/${patientId}`);
+    const envelope = unwrapEnvelope(response);
+    const patientData = envelope?.patient || envelope?.data || envelope;
+    if (patientData && (patientData.id || patientData.patientId)) {
+      return normalizePatient(patientData);
     }
   } catch {
-    // Continue to local fallback.
+    try {
+      const response = await api.get(`/patient/${patientId}`);
+      const data = unwrapEnvelope(response);
+      if (data && (data.id || data.patientId)) {
+        return normalizePatient(data);
+      }
+    } catch {
+      // offline/fallback
+    }
   }
 
   const localPatients = readLocalPatients().map(normalizePatient);
-  if (localPatients.length > 0) {
-    return localPatients;
-  }
-
-  return getFallbackPatientList();
-};
-
-export const getPatientById = async (patientId) => {
-  const patients = await getPatients();
-  return patients.find((patient) => String(patient.id) === String(patientId)) || null;
+  return localPatients.find((patient) => String(patient.id || patient.patientId) === String(patientId)) || null;
 };
 
 export const addPatient = async (patientInput) => {

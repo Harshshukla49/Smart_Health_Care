@@ -67,10 +67,10 @@ export function IncomingCallModal() {
 
           <div>
             <h3 className="text-xl font-bold text-[#0F172A]">
-              {activeCall.patientName || activeCall.callerName || 'Akash Soni'}
+              {activeCall.patientName || activeCall.callerName || activeCall.fromName || 'Patient'}
             </h3>
             <p className="text-xs text-[#64748B] font-mono mt-0.5">
-              ID: {activeCall.patientId || 'PAT-2026-2007'} · {activeCall.callerPhone || '+91 86018 45515'}
+              ID: {activeCall.patientId || activeCall.fromId || 'N/A'} · {activeCall.callerPhone || ''}
             </p>
             <span className="inline-block mt-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-0.5 text-[11px] font-bold text-[#0284C7]">
               {activeCall.isAssignedDoctor

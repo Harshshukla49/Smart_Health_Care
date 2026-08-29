@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    // Patients collection
+    // Doctor can only read/write if explicitly assigned to this patient
+    // Patient can only read/write their own document
+    match /patients/{patientId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == patientId ||
+        request.auth.uid == resource.data.patientId ||
+        request.auth.uid == resource.data.assignedDoctorId ||
+        request.auth.uid == resource.data.doctorId ||
+        request.auth.token.email == resource.data.doctorId ||
+        request.auth.token.email == resource.data.doctorEmail
+      );
+
+      allow create: if isAuthenticated() && (
+        request.auth.uid == request.resource.data.assignedDoctorId ||
+        request.auth.uid == request.resource.data.doctorId ||
+        request.auth.token.email == request.resource.data.doctorId ||
+        request.auth.uid == patientId
+      );
+
+      allow update: if isAuthenticated() && (
+        // Doctor can update clinical data, but cannot reassign assignedDoctorId unless admin
+        (
+          (request.auth.uid == resource.data.assignedDoctorId || request.auth.uid == resource.data.doctorId) &&
+          request.resource.data.assignedDoctorId == resource.data.assignedDoctorId
+        ) ||
+        // Patient can update own profile (cannot change assignedDoctorId, doctorId, or role)
+        (
+          (request.auth.uid == patientId || request.auth.uid == resource.data.patientId) &&
+          request.resource.data.assignedDoctorId == resource.data.assignedDoctorId &&
+          request.resource.data.doctorId == resource.data.doctorId
+        )
+      );
+
+      allow delete: if false; // Medical records must not be arbitrarily deleted
+
+      // Nested subcollections under patient (vitals, ecg, reports, etc.)
+      match /{subcollection}/{docId} {
+        allow read: if isAuthenticated() && (
+          request.auth.uid == patientId ||
+          request.auth.uid == get(/databases/$(database)/documents/patients/$(patientId)).data.assignedDoctorId ||
+          request.auth.uid == get(/databases/$(database)/documents/patients/$(patientId)).data.doctorId ||
+          request.auth.token.email == get(/databases/$(database)/documents/patients/$(patientId)).data.doctorId
+        );
+
+        allow write: if isAuthenticated() && (
+          request.auth.uid == patientId ||
+          request.auth.uid == get(/databases/$(database)/documents/patients/$(patientId)).data.assignedDoctorId ||
+          request.auth.uid == get(/databases/$(database)/documents/patients/$(patientId)).data.doctorId ||
+          request.auth.token.email == get(/databases/$(database)/documents/patients/$(patientId)).data.doctorId
+        );
+      }
+    }
+
+    // Doctors collection
+    // Doctor can read/write their own document
+    // Patient can ONLY read the doctor document if that doctor is assigned to them
+    match /doctors/{doctorId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == doctorId ||
+        request.auth.token.email == resource.data.email ||
+        (
+          exists(/databases/$(database)/documents/patients/$(request.auth.uid)) && (
+            get(/databases/$(database)/documents/patients/$(request.auth.uid)).data.assignedDoctorId == doctorId ||
+            get(/databases/$(database)/documents/patients/$(request.auth.uid)).data.doctorId == doctorId ||
+            get(/databases/$(database)/documents/patients/$(request.auth.uid)).data.doctorId == resource.data.email
+          )
+        )
+      );
+
+      allow write: if isAuthenticated() && (
+        request.auth.uid == doctorId ||
+        request.auth.token.email == resource.data.email
+      );
+    }
+
+    // Emergency Alerts
+    // Only accessible to the affected patient and their assigned doctor
+    match /emergencyAlerts/{alertId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == resource.data.patientId ||
+        request.auth.uid == resource.data.doctorId ||
+        request.auth.token.email == resource.data.doctorId ||
+        request.auth.uid == resource.data.assignedDoctorId ||
+        (
+          exists(/databases/$(database)/documents/patients/$(resource.data.patientId)) && (
+            get(/databases/$(database)/documents/patients/$(resource.data.patientId)).data.assignedDoctorId == request.auth.uid ||
+            get(/databases/$(database)/documents/patients/$(resource.data.patientId)).data.doctorId == request.auth.uid ||
+            get(/databases/$(database)/documents/patients/$(resource.data.patientId)).data.doctorId == request.auth.token.email
+          )
+        )
+      );
+
+      allow create: if isAuthenticated() && (
+        request.auth.uid == request.resource.data.patientId ||
+        request.auth.uid == request.resource.data.doctorId ||
+        request.auth.token.email == request.resource.data.doctorId
+      );
+
+      allow update: if isAuthenticated() && (
+        request.auth.uid == resource.data.patientId ||
+        request.auth.uid == resource.data.doctorId ||
+        request.auth.token.email == resource.data.doctorId ||
+        request.auth.uid == resource.data.assignedDoctorId
+      );
+
+      allow delete: if false;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      allow read, write: if isUser(userId);
+    }
+  }
+}
