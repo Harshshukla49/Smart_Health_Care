@@ -79,7 +79,7 @@ const getLatestText = (rows) => {
 export function Chat() {
   const session = getAuthSession();
   const role = session?.role === 'doctor' ? 'doctor' : 'patient';
-  const { openDialer } = useVideoCall();
+  const { openDialer, startCall } = useVideoCall();
   const [searchParams, setSearchParams] = useSearchParams();
   const selectedPatientId = searchParams.get('patientId') || '';
   const [doctorPatients, setDoctorPatients] = useState([]);
@@ -916,7 +916,18 @@ export function Chat() {
                 ) : (
                   <button
                     type="button"
-                    onClick={() => openDialer()}
+                    onClick={() => {
+                      if (role === 'doctor' && (selectedPatientId || contextData?.patientId)) {
+                        startCall({
+                          id: selectedPatientId || contextData?.patientId,
+                          patientId: selectedPatientId || contextData?.patientId,
+                          name: contextData?.partnerName || 'Patient',
+                          patientName: contextData?.partnerName || 'Patient',
+                        });
+                      } else {
+                        openDialer();
+                      }
+                    }}
                     className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-cyan-300/40 bg-cyan-400/15 text-cyan-100 transition hover:bg-cyan-400/25"
                     aria-label="Start video call"
                     title="Telehealth Video Consultation"

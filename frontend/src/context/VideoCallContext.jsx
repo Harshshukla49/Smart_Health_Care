@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { io } from 'socket.io-client';
 import { getAuthSession, normalizeRole } from '../utils/auth';
@@ -23,7 +23,7 @@ const RTC_CONFIG = {
   ],
 };
 
-// Standard Available Hospital Physicians (Fallback roster)
+// Standard Available Hospital Physicians (Fallback roster for patient dialing)
 export const HOSPITAL_PHYSICIANS = [
   {
     id: 'DOC-4B-01',
@@ -325,15 +325,17 @@ export function VideoCallProvider({ children }) {
       });
     });
 
-    // 1. Incoming Call Event (Received by assigned Doctor)
+    // 1. Incoming Call Event (Received by targeted participant: Doctor or Patient)
     socket.on('call:incoming', (payload) => {
-      if (!isDoctor) return;
+      // Guard: Receiver should match current role
+      if (payload.receiverRole && payload.receiverRole !== userRole) return;
+
       setActiveCall(payload);
       setCallState('incoming');
       startRingtone();
     });
 
-    // 2. Call Accepted Event (Received by Patient)
+    // 2. Call Accepted Event (Received by whichever party initiated the call)
     socket.on('call:accepted', async (payload) => {
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
@@ -343,8 +345,12 @@ export function VideoCallProvider({ children }) {
       playConnectChime();
       setCallState('connecting');
 
-      const targetDoctorId = payload.doctorId;
-      const pc = createPeerConnection(payload.callId, 'doctor', targetDoctorId);
+      // The caller initiates the WebRTC offer towards the counterparty
+      const isDoctorCaller = userRole === 'doctor';
+      const targetRole = isDoctorCaller ? 'patient' : 'doctor';
+      const targetId = isDoctorCaller ? payload.patientId : payload.doctorId;
+
+      const pc = createPeerConnection(payload.callId, targetRole, targetId);
 
       try {
         const offer = await pc.createOffer({
@@ -355,10 +361,10 @@ export function VideoCallProvider({ children }) {
 
         socket.emit('webrtc:offer', {
           callId: payload.callId,
-          targetRole: 'doctor',
-          targetId: targetDoctorId,
-          fromRole: 'patient',
-          fromId: session?.patientId,
+          targetRole,
+          targetId,
+          fromRole: userRole,
+          fromId: currentUserId,
           sdp: offer,
         });
       } catch (err) {
@@ -367,10 +373,15 @@ export function VideoCallProvider({ children }) {
       }
     });
 
-    // 3. WebRTC Offer (Received by Doctor)
+    // 3. WebRTC Offer (Received by the party that accepted the call)
     socket.on('webrtc:offer', async (payload) => {
-      const targetPatientId = payload.fromId || activeCall?.patientId;
-      const pc = createPeerConnection(payload.callId, 'patient', targetPatientId);
+      const isDoctorReceiver = userRole === 'doctor';
+      const targetRole = isDoctorReceiver ? 'patient' : 'doctor';
+      const targetId = isDoctorReceiver
+        ? (payload.fromId || activeCall?.patientId)
+        : (payload.fromId || activeCall?.doctorId);
+
+      const pc = createPeerConnection(payload.callId, targetRole, targetId);
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
@@ -386,10 +397,10 @@ export function VideoCallProvider({ children }) {
 
         socket.emit('webrtc:answer', {
           callId: payload.callId,
-          targetRole: 'patient',
-          targetId: targetPatientId,
-          fromRole: 'doctor',
-          fromId: session?.doctorId || session?.email,
+          targetRole,
+          targetId,
+          fromRole: userRole,
+          fromId: currentUserId,
           sdp: answer,
         });
 
@@ -400,7 +411,7 @@ export function VideoCallProvider({ children }) {
       }
     });
 
-    // 4. WebRTC Answer (Received by Patient)
+    // 4. WebRTC Answer (Received by the offerer)
     socket.on('webrtc:answer', async (payload) => {
       const pc = peerConnectionRef.current;
       if (pc) {
@@ -435,7 +446,7 @@ export function VideoCallProvider({ children }) {
     });
 
     // 6. Call Rejected Event
-    socket.on('call:rejected', () => {
+    socket.on('call:rejected', (payload) => {
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
@@ -444,14 +455,15 @@ export function VideoCallProvider({ children }) {
       stopMediaStream();
       closePeerConnection();
       setCallState('rejected');
-      toast.error('Doctor is currently unavailable or declined the call.');
+      const partnerName = isDoctor ? 'Patient' : 'Doctor';
+      toast.error(payload?.reason || `${partnerName} declined or is currently unavailable.`);
       setTimeout(() => {
         setCallState('idle');
         setActiveCall(null);
       }, 3000);
     });
 
-    // 7. Doctor Offline / Unavailable Event
+    // 7. Offline / Unavailable Event
     socket.on('call:unavailable', (payload) => {
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
@@ -461,14 +473,14 @@ export function VideoCallProvider({ children }) {
       stopMediaStream();
       closePeerConnection();
       setCallState('unavailable');
-      toast.error(payload?.message || 'Doctor is currently offline or unavailable. Please try again later.');
+      toast.error(payload?.message || 'Participant is currently offline or unavailable.');
       setTimeout(() => {
         setCallState('idle');
         setActiveCall(null);
       }, 3500);
     });
 
-    // 8. Doctor Busy Event
+    // 8. Busy Event
     socket.on('call:busy', (payload) => {
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
@@ -478,7 +490,7 @@ export function VideoCallProvider({ children }) {
       stopMediaStream();
       closePeerConnection();
       setCallState('busy');
-      toast.error(payload?.message || 'Doctor is currently on another call. Please try again shortly.');
+      toast.error(payload?.message || 'Participant is currently on another call.');
       setTimeout(() => {
         setCallState('idle');
         setActiveCall(null);
@@ -520,6 +532,7 @@ export function VideoCallProvider({ children }) {
   }, [
     createPeerConnection,
     closePeerConnection,
+    currentUserId,
     isDoctor,
     playConnectChime,
     session,
@@ -549,7 +562,7 @@ export function VideoCallProvider({ children }) {
     };
   }, [callState]);
 
-  // API: Open Patient Dialer Modal
+  // API: Open Dialer Modal
   const openDialer = useCallback((defaultDoctor = null) => {
     if (defaultDoctor) {
       setDialerDefaultDoctor(defaultDoctor);
@@ -580,9 +593,10 @@ export function VideoCallProvider({ children }) {
     setIsDialerOpen(false);
   }, []);
 
-  // API: Patient starts call to doctor
-  const startCall = useCallback(async (targetDoctor) => {
+  // API: Start Video Call (Bidirectional: Doctor -> Patient OR Patient -> Doctor)
+  const startCall = useCallback(async (target) => {
     setIsDialerOpen(false);
+
     const media = await acquireMediaStream();
     if (!media) {
       toast.error('Cannot place video call without camera/microphone permission.');
@@ -590,43 +604,94 @@ export function VideoCallProvider({ children }) {
     }
 
     const currentSession = getAuthSession();
-    const resolvedDoctorId = String(
-      targetDoctor?.id ||
-      targetDoctor?.email ||
-      currentSession?.doctorId ||
-      currentSession?.doctorEmail ||
-      ''
-    ).trim().lower();
-
-    const resolvedDoctorName = targetDoctor?.name ||
-      currentSession?.doctorName ||
-      'Assigned Physician';
-
+    const isDoctorCaller = userRole === 'doctor';
     const generatedCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+    let callerId = currentUserId;
+    let callerRole = userRole;
+    let callerName = currentUserName;
+
+    let receiverRole;
+    let receiverId;
+    let receiverName;
+    let doctorId;
+    let doctorName;
+    let patientId;
+    let patientName;
+
+    if (isDoctorCaller) {
+      // DOCTOR INITIATES CALL TO SELECTED PATIENT
+      receiverRole = 'patient';
+      receiverId = String(target?.patientId || target?.id || '').trim();
+      receiverName = String(target?.patientName || target?.name || 'Patient').trim();
+
+      if (!receiverId) {
+        toast.error('Cannot start call: No patient selected.');
+        stopMediaStream();
+        return;
+      }
+
+      doctorId = currentUserId.toLowerCase();
+      doctorName = currentUserName;
+      patientId = receiverId;
+      patientName = receiverName;
+    } else {
+      // PATIENT INITIATES CALL TO ASSIGNED DOCTOR
+      receiverRole = 'doctor';
+      receiverId = String(
+        target?.doctorId ||
+        target?.id ||
+        target?.email ||
+        currentSession?.doctorId ||
+        currentSession?.doctorEmail ||
+        ''
+      ).trim().toLowerCase();
+
+      receiverName = String(
+        target?.doctorName ||
+        target?.name ||
+        currentSession?.doctorName ||
+        'Assigned Physician'
+      ).trim();
+
+      if (!receiverId) {
+        toast.error('Cannot start call: No assigned doctor available.');
+        stopMediaStream();
+        return;
+      }
+
+      doctorId = receiverId;
+      doctorName = receiverName;
+      patientId = currentUserId;
+      patientName = currentUserName;
+    }
 
     const callPayload = {
       callId: generatedCallId,
-      patientId: currentSession?.patientId || '',
-      patientName: currentSession?.name || 'Patient',
-      doctorId: resolvedDoctorId,
-      doctorName: resolvedDoctorName,
-      callerRole: userRole,
-      callerId: currentUserId,
-      callerName: currentUserName,
-      recipientId: resolvedDoctorId,
-      recipientName: resolvedDoctorName,
-      recipientTitle: targetDoctor?.title || 'Attending Physician',
-      recipientDepartment: targetDoctor?.department || 'Ward 4B',
-      recipientPhone: targetDoctor?.phone || '+91 98765 43210',
-      recipientExtension: targetDoctor?.extension || '401',
-      isAssignedDoctor: Boolean(targetDoctor?.isAssigned ?? true),
+      callerRole,
+      callerId,
+      callerName,
+      receiverRole,
+      receiverId,
+      receiverName,
+      patientId,
+      patientName,
+      doctorId,
+      doctorName,
+      recipientId: receiverId,
+      recipientName: receiverName,
+      recipientTitle: target?.title || (isDoctorCaller ? 'Monitored Patient' : 'Attending Physician'),
+      recipientDepartment: target?.department || 'Ward 4B',
+      recipientPhone: target?.phone || '+91 98765 43210',
+      recipientExtension: target?.extension || '401',
+      isAssignedDoctor: Boolean(target?.isAssigned ?? true),
       callType: 'video',
       status: 'calling',
-      vitalsSnapshot: {
-        heartRate: 72,
-        spo2: 98,
-        temperature: 36.7,
-        status: 'Normal Sinus Rhythm',
+      vitalsSnapshot: target?.vitalsSnapshot || {
+        heartRate: target?.heartRate || 72,
+        spo2: target?.spo2 || 98,
+        temperature: target?.temperature || 36.7,
+        status: target?.status || 'Normal Sinus Rhythm',
       },
       startedAt: Date.now(),
     };
@@ -635,7 +700,7 @@ export function VideoCallProvider({ children }) {
     setCallState('calling');
     startRingtone();
 
-    // 45-second auto-timeout if doctor does not answer
+    // 45-second auto-timeout if partner does not answer
     if (callTimeoutRef.current) {
       clearTimeout(callTimeoutRef.current);
     }
@@ -645,12 +710,13 @@ export function VideoCallProvider({ children }) {
       closePeerConnection();
       setCallState('idle');
       setActiveCall(null);
-      toast.error('Doctor did not answer. Please try again or request a callback.');
+      const partnerRoleLabel = isDoctorCaller ? 'Patient' : 'Doctor';
+      toast.error(`${partnerRoleLabel} did not answer. Please try again shortly.`);
       if (socketRef.current) {
         socketRef.current.emit('call:end', {
           callId: generatedCallId,
-          patientId: currentSession?.patientId,
-          doctorId: resolvedDoctorId,
+          patientId,
+          doctorId,
         });
       }
     }, 45000);
@@ -671,7 +737,7 @@ export function VideoCallProvider({ children }) {
     userRole,
   ]);
 
-  // API: Doctor accepts call
+  // API: Receiver accepts call
   const acceptCall = useCallback(async () => {
     if (!activeCall) return;
     stopRingtone();
@@ -687,12 +753,14 @@ export function VideoCallProvider({ children }) {
       socketRef.current.emit('call:accept', {
         callId: activeCall.callId,
         patientId: activeCall.patientId,
-        doctorId: activeCall.doctorId || currentUserId,
+        doctorId: activeCall.doctorId,
+        acceptedByRole: userRole,
+        acceptedById: currentUserId,
       });
     }
-  }, [acquireMediaStream, activeCall, currentUserId, stopRingtone]);
+  }, [acquireMediaStream, activeCall, currentUserId, stopRingtone, userRole]);
 
-  // API: Doctor declines call
+  // API: Receiver declines call
   const declineCall = useCallback(() => {
     if (!activeCall) return;
     stopRingtone();
@@ -703,15 +771,15 @@ export function VideoCallProvider({ children }) {
       socketRef.current.emit('call:reject', {
         callId: activeCall.callId,
         patientId: activeCall.patientId,
-        doctorId: activeCall.doctorId || currentUserId,
-        reason: 'Physician declined call',
+        doctorId: activeCall.doctorId,
+        reason: `${isDoctor ? 'Physician' : 'Patient'} declined the call`,
       });
     }
 
     setCallState('idle');
     setActiveCall(null);
     toast('Call declined.', { icon: '📵' });
-  }, [activeCall, closePeerConnection, currentUserId, stopMediaStream, stopRingtone]);
+  }, [activeCall, closePeerConnection, isDoctor, stopMediaStream, stopRingtone]);
 
   // API: End Active Call
   const endCall = useCallback(() => {
@@ -733,7 +801,7 @@ export function VideoCallProvider({ children }) {
       socketRef.current.emit('call:end', {
         callId: activeCall.callId,
         patientId: activeCall.patientId,
-        doctorId: activeCall.doctorId || currentUserId,
+        doctorId: activeCall.doctorId,
         duration: callDuration,
       });
     }
@@ -744,7 +812,7 @@ export function VideoCallProvider({ children }) {
       setActiveCall(null);
       setCallDuration(0);
     }, 1200);
-  }, [activeCall, closePeerConnection, callDuration, currentUserId, stopMediaStream, stopRingtone]);
+  }, [activeCall, closePeerConnection, callDuration, stopMediaStream, stopRingtone]);
 
   // Audio/Video Mute toggles
   const toggleMute = useCallback(() => {
@@ -768,6 +836,30 @@ export function VideoCallProvider({ children }) {
   // Format call duration MM:SS
   const formattedDuration = `${String(Math.floor(callDuration / 60)).padStart(2, '0')}:${String(callDuration % 60).padStart(2, '0')}`;
 
+  // Explicit Participant Identity Separation
+  const localParticipant = useMemo(() => ({
+    role: userRole,
+    id: currentUserId,
+    name: currentUserName,
+  }), [currentUserId, currentUserName, userRole]);
+
+  const remoteParticipant = useMemo(() => {
+    if (!activeCall) return null;
+    if (isDoctor) {
+      return {
+        role: 'patient',
+        id: activeCall.patientId,
+        name: activeCall.patientName || 'Patient',
+        vitals: activeCall.vitalsSnapshot,
+      };
+    }
+    return {
+      role: 'doctor',
+      id: activeCall.doctorId,
+      name: activeCall.doctorName || 'Assigned Physician',
+    };
+  }, [activeCall, isDoctor]);
+
   const value = {
     isDialerOpen,
     openDialer,
@@ -787,6 +879,8 @@ export function VideoCallProvider({ children }) {
     toggleCamera,
     localStream,
     remoteStream,
+    localParticipant,
+    remoteParticipant,
     hospitalPhysicians: HOSPITAL_PHYSICIANS,
   };
 

@@ -4557,6 +4557,11 @@ def on_socket_disconnect(*args, **kwargs):
         _chat_emit_presence(role, actor_id, True, sid=remaining_sid)
     else:
         _chat_emit_presence(role, actor_id, False)
+        # Cancel pending ringing calls involving this disconnected user
+        for c_id, c_data in list(active_video_calls.items()):
+            if c_data.get('status') == 'ringing':
+                if c_data.get('doctorId') == actor_id.lower() or c_data.get('patientId') == actor_id:
+                    active_video_calls.pop(c_id, None)
 
 
 @socketio.on('call:register')
@@ -4735,8 +4740,22 @@ def on_call_request(data):
         return
 
     call_id = str(payload.get('callId') or f"call_{int(time.time() * 1000)}_{secrets.token_hex(4)}").strip()
-    patient_id = str(payload.get('patientId') or (actor_id if actor_role == 'patient' else '')).strip()
-    doctor_id = str(payload.get('doctorId') or (actor_id if actor_role == 'doctor' else '')).strip().lower()
+
+    # Determine Caller vs Receiver
+    if actor_role == 'doctor':
+        caller_role = 'doctor'
+        caller_id = actor_id.lower()
+        receiver_role = 'patient'
+        receiver_id = str(payload.get('patientId') or payload.get('receiverId') or '').strip()
+        patient_id = receiver_id
+        doctor_id = caller_id
+    else:
+        caller_role = 'patient'
+        caller_id = actor_id
+        receiver_role = 'doctor'
+        receiver_id = str(payload.get('doctorId') or payload.get('receiverId') or '').strip().lower()
+        patient_id = caller_id
+        doctor_id = receiver_id
 
     thread_id = str(payload.get('threadId') or '').strip()
     if thread_id and (not patient_id or not doctor_id):
@@ -4764,7 +4783,10 @@ def on_call_request(data):
             or ''
         ).strip().lower()
         if assigned != doctor_id.lower() and doctor_id.lower() not in assigned:
-            emit('call:error', {'message': 'Doctor is not assigned to this patient.'})
+            if actor_role == 'doctor':
+                emit('call:error', {'message': 'You are not authorized to call this patient. Patient is not assigned under your clinical care.'})
+            else:
+                emit('call:error', {'message': 'Doctor is not assigned to this patient.'})
             return
 
     patient_name = str(payload.get('patientName') or patient_record.get('name') or 'Patient').strip()
@@ -4773,78 +4795,158 @@ def on_call_request(data):
     ).strip()
 
     now_iso = _chat_now_iso()
+    now_ts = time.time()
 
-    # Check Doctor Online Presence
-    doc_keys = [
-        _chat_presence_key('doctor', doctor_id),
-        f"doctor:{doctor_id.lower()}",
-    ]
-    if '@' in doctor_id:
-        doc_keys.append(f"doctor:{doctor_id.split('@')[0].lower()}")
-
-    doc_sessions = set()
-    for dk in doc_keys:
-        doc_sessions.update(chat_user_connections.get(dk) or set())
-
-    if not doc_sessions:
-        for k, s in chat_user_connections.items():
-            if k.startswith('doctor:') and (doctor_id.lower() in k.lower()):
-                doc_sessions.update(s)
-
-    # Doctor is Offline / Unavailable
-    if not doc_sessions:
-        call_record = {
-            'callId': call_id,
-            'patientId': patient_id,
-            'patientName': patient_name,
-            'doctorId': doctor_id,
-            'doctorName': doctor_name,
-            'status': 'unavailable',
-            'callType': 'video',
-            'createdAt': now_iso,
-            'endedAt': now_iso,
-        }
-        try:
-            _calls_reference().child(call_id).set(call_record)
-        except Exception as e:
-            print(f"[CALL] Error writing call to RTDB: {e}")
-
-        emit('call:unavailable', {
-            'callId': call_id,
-            'doctorId': doctor_id,
-            'doctorName': doctor_name,
-            'message': f"{doctor_name} is currently offline or unavailable. Please try again later.",
-        })
-        return
-
-    # Check Busy Status
+    # Self-healing: Purge expired/abandoned calls (>45s ringing or >2h connected)
     for existing_id, call_info in list(active_video_calls.items()):
-        if (
-            call_info.get('doctorId') == doctor_id
-            and call_info.get('status') in ('ringing', 'accepted', 'connected')
-            and existing_id != call_id
-        ):
-            emit('call:busy', {
+        call_created_ts = call_info.get('createdTs') or 0
+        call_st = call_info.get('status')
+        if call_st == 'ringing' and (now_ts - call_created_ts > 45):
+            active_video_calls.pop(existing_id, None)
+        elif now_ts - call_created_ts > 7200:
+            active_video_calls.pop(existing_id, None)
+
+    # Check Presence of the RECEIVER
+    receiver_sessions = set()
+    if receiver_role == 'patient':
+        pat_keys = [
+            f"patient:{patient_id.lower()}",
+            _chat_presence_key('patient', patient_id),
+        ]
+        for pk in pat_keys:
+            receiver_sessions.update(chat_user_connections.get(pk) or set())
+
+        if not receiver_sessions:
+            for k, s in chat_user_connections.items():
+                if k.startswith('patient:') and (patient_id.lower() in k.lower()):
+                    receiver_sessions.update(s)
+
+        if not receiver_sessions:
+            call_record = {
+                'callId': call_id,
+                'callerRole': caller_role,
+                'callerId': caller_id,
+                'callerName': doctor_name,
+                'receiverRole': receiver_role,
+                'receiverId': receiver_id,
+                'receiverName': patient_name,
+                'patientId': patient_id,
+                'patientName': patient_name,
+                'doctorId': doctor_id,
+                'doctorName': doctor_name,
+                'status': 'unavailable',
+                'callType': 'video',
+                'createdAt': now_iso,
+                'endedAt': now_iso,
+            }
+            try:
+                _calls_reference().child(call_id).set(call_record)
+            except Exception as e:
+                print(f"[CALL] Error writing call to RTDB: {e}")
+
+            emit('call:unavailable', {
+                'callId': call_id,
+                'patientId': patient_id,
+                'patientName': patient_name,
+                'message': f"{patient_name} is currently offline or disconnected.",
+            })
+            return
+
+        # Check Busy Status for Patient
+        for existing_id, call_info in list(active_video_calls.items()):
+            if (
+                call_info.get('patientId') == patient_id
+                and call_info.get('status') in ('ringing', 'accepted', 'connected')
+                and existing_id != call_id
+            ):
+                emit('call:busy', {
+                    'callId': call_id,
+                    'patientId': patient_id,
+                    'patientName': patient_name,
+                    'message': f"{patient_name} is currently on another call.",
+                })
+                return
+
+    else:
+        # Receiver is Doctor
+        doc_keys = [
+            _chat_presence_key('doctor', doctor_id),
+            f"doctor:{doctor_id.lower()}",
+        ]
+        if '@' in doctor_id:
+            doc_keys.append(f"doctor:{doctor_id.split('@')[0].lower()}")
+
+        for dk in doc_keys:
+            receiver_sessions.update(chat_user_connections.get(dk) or set())
+
+        if not receiver_sessions:
+            for k, s in chat_user_connections.items():
+                if k.startswith('doctor:') and (doctor_id.lower() in k.lower()):
+                    receiver_sessions.update(s)
+
+        if not receiver_sessions:
+            call_record = {
+                'callId': call_id,
+                'callerRole': caller_role,
+                'callerId': caller_id,
+                'callerName': patient_name,
+                'receiverRole': receiver_role,
+                'receiverId': receiver_id,
+                'receiverName': doctor_name,
+                'patientId': patient_id,
+                'patientName': patient_name,
+                'doctorId': doctor_id,
+                'doctorName': doctor_name,
+                'status': 'unavailable',
+                'callType': 'video',
+                'createdAt': now_iso,
+                'endedAt': now_iso,
+            }
+            try:
+                _calls_reference().child(call_id).set(call_record)
+            except Exception as e:
+                print(f"[CALL] Error writing call to RTDB: {e}")
+
+            emit('call:unavailable', {
                 'callId': call_id,
                 'doctorId': doctor_id,
                 'doctorName': doctor_name,
-                'message': f"{doctor_name} is currently on another clinical call. Please try again shortly.",
+                'message': f"{doctor_name} is currently offline or unavailable. Please try again later.",
             })
             return
+
+        # Check Busy Status for Doctor
+        for existing_id, call_info in list(active_video_calls.items()):
+            if (
+                call_info.get('doctorId') == doctor_id
+                and call_info.get('status') in ('ringing', 'accepted', 'connected')
+                and existing_id != call_id
+            ):
+                emit('call:busy', {
+                    'callId': call_id,
+                    'doctorId': doctor_id,
+                    'doctorName': doctor_name,
+                    'message': f"{doctor_name} is currently on another clinical call. Please try again shortly.",
+                })
+                return
 
     vitals_snapshot = payload.get('vitalsSnapshot') or {}
     call_payload = {
         'callId': call_id,
+        'callerRole': caller_role,
+        'callerId': caller_id,
+        'callerName': doctor_name if caller_role == 'doctor' else patient_name,
+        'receiverRole': receiver_role,
+        'receiverId': receiver_id,
+        'receiverName': patient_name if receiver_role == 'patient' else doctor_name,
         'patientId': patient_id,
         'patientName': patient_name,
         'doctorId': doctor_id,
         'doctorName': doctor_name,
-        'callerRole': actor_role,
-        'callerId': actor_id,
-        'callerName': patient_name if actor_role == 'patient' else doctor_name,
         'callType': str(payload.get('callType') or 'video'),
         'status': 'ringing',
         'createdAt': now_iso,
+        'createdTs': now_ts,
         'threadId': thread_id or f"d_{_chat_safe_key(doctor_id)}__p_{_chat_safe_key(patient_id)}",
         'vitalsSnapshot': vitals_snapshot,
     }
@@ -4856,10 +4958,15 @@ def on_call_request(data):
     except Exception as e:
         print(f"[CALL] Error writing call to RTDB: {e}")
 
-    # Emit incoming call to doctor room and doctor sockets
-    socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.lower()}")
-    for s in doc_sessions:
-        socketio.emit('call:incoming', call_payload, to=s)
+    # Emit incoming call directly to the receiver's room and active sockets
+    if receiver_role == 'patient':
+        socketio.emit('call:incoming', call_payload, to=f"patient:{patient_id.lower()}")
+        for s in receiver_sessions:
+            socketio.emit('call:incoming', call_payload, to=s)
+    else:
+        socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.lower()}")
+        for s in receiver_sessions:
+            socketio.emit('call:incoming', call_payload, to=s)
 
     # Emit ringing confirmation back to caller
     emit('call:outgoing', call_payload)
@@ -4873,6 +4980,7 @@ def on_call_accept(data):
     call_info = active_video_calls.get(call_id) or {}
     patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
     doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
+    caller_role = str(call_info.get('callerRole') or 'patient').strip().lower()
 
     now_iso = _chat_now_iso()
     if call_id in active_video_calls:
@@ -4889,15 +4997,23 @@ def on_call_accept(data):
 
     accept_payload = {
         'callId': call_id,
+        'callerRole': caller_role,
         'patientId': patient_id,
+        'patientName': call_info.get('patientName') or 'Patient',
         'doctorId': doctor_id,
         'doctorName': call_info.get('doctorName') or 'Doctor',
         'acceptedAt': now_iso,
         'threadId': call_info.get('threadId') or f"d_{_chat_safe_key(doctor_id)}__p_{_chat_safe_key(patient_id)}",
     }
 
-    socketio.emit('call:accepted', accept_payload, to=f"patient:{patient_id.lower()}")
-    _chat_emit_to_user('patient', patient_id, 'call:accepted', accept_payload)
+    # If Doctor was the caller, notify Doctor when Patient accepts.
+    # If Patient was the caller, notify Patient when Doctor accepts.
+    if caller_role == 'doctor':
+        socketio.emit('call:accepted', accept_payload, to=f"doctor:{doctor_id.lower()}")
+        _chat_emit_to_user('doctor', doctor_id, 'call:accepted', accept_payload)
+    else:
+        socketio.emit('call:accepted', accept_payload, to=f"patient:{patient_id.lower()}")
+        _chat_emit_to_user('patient', patient_id, 'call:accepted', accept_payload)
 
 
 @socketio.on('call:reject')
@@ -4907,6 +5023,7 @@ def on_call_reject(data):
     call_info = active_video_calls.pop(call_id, {})
     patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
     doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
+    caller_role = str(call_info.get('callerRole') or 'patient').strip().lower()
 
     now_iso = _chat_now_iso()
     try:
@@ -4920,13 +5037,20 @@ def on_call_reject(data):
     reject_payload = {
         'callId': call_id,
         'patientId': patient_id,
+        'patientName': call_info.get('patientName') or 'Patient',
         'doctorId': doctor_id,
+        'doctorName': call_info.get('doctorName') or 'Doctor',
         'rejectedAt': now_iso,
-        'reason': payload.get('reason') or 'Doctor declined the call',
+        'reason': payload.get('reason') or 'Call was declined',
         'threadId': call_info.get('threadId') or '',
     }
-    socketio.emit('call:rejected', reject_payload, to=f"patient:{patient_id.lower()}")
-    _chat_emit_to_user('patient', patient_id, 'call:rejected', reject_payload)
+
+    if caller_role == 'doctor':
+        socketio.emit('call:rejected', reject_payload, to=f"doctor:{doctor_id.lower()}")
+        _chat_emit_to_user('doctor', doctor_id, 'call:rejected', reject_payload)
+    else:
+        socketio.emit('call:rejected', reject_payload, to=f"patient:{patient_id.lower()}")
+        _chat_emit_to_user('patient', patient_id, 'call:rejected', reject_payload)
 
 
 @socketio.on('call:decline')

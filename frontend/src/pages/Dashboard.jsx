@@ -84,7 +84,7 @@ function DashboardWithEmergency() {
 function DashboardBody({ liveVitals }) {
   const { t } = useI18n();
   const emergency = useEmergency();
-  const { openDialer, simulateIncomingPatientCall } = useVideoCall();
+  const { openDialer, startCall, simulateIncomingPatientCall } = useVideoCall();
 
   const {
     loading,
@@ -438,17 +438,35 @@ function DashboardBody({ liveVitals }) {
     : (doctorSpecialty || session?.doctorSpecialty || 'Cardiologist (Ward 4B)');
 
   const handleOpenVideoDialer = () => {
-    openDialer({
-      id: attendingDoctorId || attendingDoctorEmail || 'assigned-doctor',
-      email: attendingDoctorEmail,
-      name: attendingDoctorName,
-      title: attendingDoctorSpecialty,
-      department: 'Cardiology & Intensive Ward 4B',
-      phone: attendingDoctorPhone,
-      extension: '401',
-      avatar: '/assets/doctor-command-center.png',
-      isAssigned: true,
-    });
+    if (isDoctor) {
+      const targetPt = selectedPatient || (doctorPatients.length > 0 ? doctorPatients[0] : null);
+      if (targetPt) {
+        startCall({
+          id: targetPt.id,
+          patientId: targetPt.id,
+          name: targetPt.name,
+          patientName: targetPt.name,
+          heartRate: targetPt.heartRate,
+          spo2: targetPt.spo2,
+          temperature: targetPt.temperature,
+          status: targetPt.status || 'Monitoring',
+        });
+      } else {
+        toast.error('No patients assigned under your care to call.');
+      }
+    } else {
+      openDialer({
+        id: attendingDoctorId || attendingDoctorEmail || 'assigned-doctor',
+        email: attendingDoctorEmail,
+        name: attendingDoctorName,
+        title: attendingDoctorSpecialty,
+        department: 'Cardiology & Intensive Ward 4B',
+        phone: attendingDoctorPhone,
+        extension: '401',
+        avatar: '/assets/doctor-command-center.png',
+        isAssigned: true,
+      });
+    }
   };
 
   return (
@@ -1101,6 +1119,28 @@ function DashboardBody({ liveVitals }) {
                               </td>
                               <td className="px-5 py-3.5 text-right">
                                 <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedPatientId(pt.id);
+                                      startCall({
+                                        id: pt.id,
+                                        patientId: pt.id,
+                                        name: pt.name,
+                                        patientName: pt.name,
+                                        heartRate: pt.heartRate,
+                                        spo2: pt.spo2,
+                                        temperature: pt.temperature,
+                                        status: pt.status || 'Monitoring',
+                                      });
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition shadow-2xs"
+                                    title={`Initiate Telehealth Video Call with ${pt.name || 'Patient'}`}
+                                  >
+                                    <Video className="h-3.5 w-3.5 text-teal-600" />
+                                    <span>Video Call</span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={(e) => {

@@ -134,9 +134,15 @@ export function DashboardLayout({
                 {/* Quick Telehealth Video Call Button */}
                 <button
                   type="button"
-                  onClick={() => openDialer()}
+                  onClick={() => {
+                    if (isDoctor) {
+                      toast('To start a video call, click "Video Call" on any patient row or workspace.', { icon: '🩺' });
+                    } else {
+                      openDialer();
+                    }
+                  }}
                   className="relative grid h-9 w-9 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-[#0D9488] transition hover:bg-teal-100 shadow-2xs"
-                  title="Start Telehealth Video Consultation"
+                  title={isDoctor ? 'Initiate consultation from patient roster' : 'Start Telehealth Video Consultation'}
                 >
                   <Video className="h-4 w-4" />
                 </button>

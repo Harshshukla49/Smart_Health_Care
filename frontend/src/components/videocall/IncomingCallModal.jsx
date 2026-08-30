@@ -2,20 +2,29 @@ import React from 'react';
 import {
   Video,
   PhoneOff,
-  PhoneCall,
   User,
-  HeartPulse,
   Activity,
-  Thermometer,
   ShieldAlert,
-  Waves,
 } from 'lucide-react';
 import { useVideoCall } from '../../context/VideoCallContext';
+import { getAuthSession, normalizeRole } from '../../utils/auth';
 
 export function IncomingCallModal() {
   const { callState, activeCall, acceptCall, declineCall } = useVideoCall();
+  const session = getAuthSession();
+  const userRole = normalizeRole(session?.role);
+  const isDoctor = userRole === 'doctor';
 
   if (callState !== 'incoming' || !activeCall) return null;
+
+  const isIncomingFromDoctor = activeCall.callerRole === 'doctor';
+  const callerDisplayName = isIncomingFromDoctor
+    ? (activeCall.doctorName || activeCall.callerName || 'Dr. Assigned Physician')
+    : (activeCall.patientName || activeCall.callerName || 'Patient');
+
+  const callerDisplaySubtitle = isIncomingFromDoctor
+    ? 'Attending Physician · Clinical Ward 4B'
+    : `Patient ID: ${activeCall.patientId || activeCall.callerId || 'N/A'}`;
 
   const vitals = activeCall.vitalsSnapshot || {
     heartRate: 72,
@@ -40,7 +49,7 @@ export function IncomingCallModal() {
             </span>
           </div>
           <h2 className="relative z-10 text-xl font-black mt-1">
-            Patient Telehealth Request
+            {isIncomingFromDoctor ? 'Doctor Telehealth Consultation' : 'Patient Telehealth Request'}
           </h2>
         </div>
 
@@ -50,15 +59,20 @@ export function IncomingCallModal() {
           <div className="relative mx-auto w-24 h-24">
             <div className="absolute inset-0 rounded-full bg-emerald-100 animate-ping opacity-75" />
             <div className="relative w-24 h-24 rounded-full border-4 border-emerald-500 bg-slate-100 overflow-hidden shadow-lg mx-auto flex items-center justify-center">
-              <img
-                src="/assets/patient-remote-care.png"
-                alt="Caller"
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  e.target.style.display = 'none';
-                }}
-              />
-              <User className="h-10 w-10 text-slate-400 absolute" />
+              {isIncomingFromDoctor ? (
+                <img
+                  src="/assets/doctor-command-center.png"
+                  alt="Doctor"
+                  className="w-full h-full object-cover"
+                  onError={(e) => {
+                    e.target.src = '/assets/doctor-telemetry-desk.jpg';
+                  }}
+                />
+              ) : (
+                <div className="w-full h-full bg-gradient-to-br from-teal-600 to-emerald-800 flex items-center justify-center text-white text-2xl font-black">
+                  {(callerDisplayName || 'PT').slice(0, 2).toUpperCase()}
+                </div>
+              )}
             </div>
             <span className="absolute bottom-0 right-1 h-6 w-6 rounded-full bg-emerald-500 border-2 border-white grid place-items-center text-white shadow-xs">
               <Video className="h-3 w-3" />
@@ -67,48 +81,50 @@ export function IncomingCallModal() {
 
           <div>
             <h3 className="text-xl font-bold text-[#0F172A]">
-              {activeCall.patientName || activeCall.callerName || activeCall.fromName || 'Patient'}
+              {callerDisplayName}
             </h3>
             <p className="text-xs text-[#64748B] font-mono mt-0.5">
-              ID: {activeCall.patientId || activeCall.fromId || 'N/A'} · {activeCall.callerPhone || ''}
+              {callerDisplaySubtitle}
             </p>
-            <span className="inline-block mt-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-0.5 text-[11px] font-bold text-[#0284C7]">
-              {activeCall.isAssignedDoctor
-                ? '⭐ Direct Call to Assigned Doctor'
-                : `Ext ${activeCall.recipientExtension || '401'} Line`}
+            <span className="inline-block mt-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-0.5 text-[11px] font-bold text-emerald-700">
+              {isIncomingFromDoctor
+                ? '⭐ Direct Consultation from Your Attending Doctor'
+                : 'Direct Patient Clinical Telehealth Request'}
             </span>
           </div>
 
-          {/* Live Vitals Snapshot */}
-          <div className="rounded-[14px] border border-[#E2E8F0] bg-slate-50/90 p-3.5 text-left">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-2 flex items-center gap-1.5">
-              <Activity className="h-3 w-3 text-[#0284C7]" />
-              <span>Current Telemetry Stream Preview</span>
-            </p>
-            <div className="grid grid-cols-3 gap-2 text-center">
-              <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-500 block">Heart Rate</span>
-                <span className="text-sm font-extrabold text-[#0F172A]">
-                  {vitals.heartRate} <span className="text-[9px] font-normal text-slate-400">BPM</span>
-                </span>
+          {/* Live Vitals Snapshot (Visible if caller is patient) */}
+          {!isIncomingFromDoctor && (
+            <div className="rounded-[14px] border border-[#E2E8F0] bg-slate-50/90 p-3.5 text-left">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8] mb-2 flex items-center gap-1.5">
+                <Activity className="h-3 w-3 text-[#0284C7]" />
+                <span>Patient Telemetry Stream Preview</span>
+              </p>
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 block">Heart Rate</span>
+                  <span className="text-sm font-extrabold text-[#0F172A]">
+                    {vitals.heartRate} <span className="text-[9px] font-normal text-slate-400">BPM</span>
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 block">SpO2</span>
+                  <span className="text-sm font-extrabold text-emerald-700">
+                    {vitals.spo2}%
+                  </span>
+                </div>
+                <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
+                  <span className="text-[10px] text-slate-500 block">Temp</span>
+                  <span className="text-sm font-extrabold text-[#0F172A]">
+                    {vitals.temperature}°C
+                  </span>
+                </div>
               </div>
-              <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-500 block">SpO2</span>
-                <span className="text-sm font-extrabold text-emerald-700">
-                  {vitals.spo2}%
-                </span>
-              </div>
-              <div className="rounded-lg bg-white p-2 border border-slate-200/70 shadow-2xs">
-                <span className="text-[10px] text-slate-500 block">Temp</span>
-                <span className="text-sm font-extrabold text-[#0F172A]">
-                  {vitals.temperature}°C
-                </span>
-              </div>
+              <p className="text-[11px] text-[#64748B] text-center mt-2 font-medium">
+                Rhythm: <strong className="text-emerald-700">{vitals.status}</strong>
+              </p>
             </div>
-            <p className="text-[11px] text-[#64748B] text-center mt-2 font-medium">
-              Rhythm: <strong className="text-emerald-700">{vitals.status}</strong>
-            </p>
-          </div>
+          )}
 
           {/* Action Buttons */}
           <div className="grid grid-cols-2 gap-3 pt-1">

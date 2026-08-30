@@ -17,6 +17,7 @@ import {
   Printer,
   ShieldAlert,
   Thermometer,
+  Video,
   Waves,
 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
@@ -30,6 +31,7 @@ import { Button } from '../components/Button';
 import { ECGChart } from '../components/ECGChart';
 import { AiHealthAssessment } from '../components/AiHealthAssessment';
 import { MedicationManagement } from '../components/MedicationManagement';
+import { useVideoCall } from '../context/VideoCallContext';
 import {
   connectPatientDevice,
   disconnectPatientDevice,
@@ -61,6 +63,7 @@ export function PatientDetails() {
   const isPatient = session?.role === 'patient';
   const selfPatientId = String(session?.patientId || '').trim();
   const requestedId = String(patientId || '').trim();
+  const { startCall } = useVideoCall();
 
   const [activeTab, setActiveTab] = useState('overview');
   const [patient, setPatient] = useState(null);
@@ -393,6 +396,28 @@ export function PatientDetails() {
           </div>
 
           <div className="flex items-center gap-2 self-start sm:self-center">
+            {isDoctor && (
+              <button
+                type="button"
+                onClick={() => {
+                  startCall({
+                    id: patient.id,
+                    patientId: patient.id,
+                    name: patient.name,
+                    patientName: patient.name,
+                    heartRate: patient.vitals?.heartRate,
+                    spo2: patient.vitals?.spo2,
+                    temperature: patient.vitals?.temperature,
+                    status: patient.prediction?.status || 'Monitoring',
+                  });
+                }}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 text-xs font-bold transition shadow-sm hover:shadow-md active:scale-[0.98]"
+                title={`Start Telehealth Video Consultation with ${patient.name}`}
+              >
+                <Video className="h-4 w-4" />
+                <span>Video Call Patient</span>
+              </button>
+            )}
             <Link
               to="/dashboard"
               className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition shadow-xs"
