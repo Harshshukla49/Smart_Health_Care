@@ -166,9 +166,13 @@ export default function App() {
               }
             />
 
-            {/* SCOPED: Patient Details Route (Doctor = all patients, Patient = self only) */}
+            {/* SCOPED: Patient Details Route (Scoped workspace for assigned doctor / patient) */}
             <Route
               path="/patients/:patientId"
+              element={<ScopedPatientDetailsRoute />}
+            />
+            <Route
+              path="/doctor/patients/:patientId"
               element={<ScopedPatientDetailsRoute />}
             />
 

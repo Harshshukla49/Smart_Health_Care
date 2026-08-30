@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   Bell,
   BrainCircuit,
+  CalendarCheck,
   FileText,
   HeartPulse,
   History,
@@ -49,6 +50,7 @@ const CLINICAL_TABS = [
   { id: 'first-aid', label: 'First Aid', icon: ShieldAlert },
   { id: 'medications', label: 'Medications', icon: Pill },
   { id: 'prescriptions', label: 'Prescriptions', icon: FileText },
+  { id: 'adherence', label: 'Adherence', icon: CalendarCheck },
   { id: 'reports', label: 'Reports', icon: Printer },
 ];
 
@@ -60,23 +62,12 @@ export function PatientDetails() {
   const selfPatientId = String(session?.patientId || '').trim();
   const requestedId = String(patientId || '').trim();
 
-  // Scoped Security Guard: A patient can ONLY view their own records
-  if (isPatient && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase()) {
-    return (
-      <div className="p-6">
-        <ErrorState
-          title="Access Restricted"
-          message="Patient accounts are strictly scoped to their own personal health records. You cannot view telemetry for other patients."
-        />
-      </div>
-    );
-  }
-
   const [activeTab, setActiveTab] = useState('overview');
   const [patient, setPatient] = useState(null);
   const [audit, setAudit] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [accessDenied, setAccessDenied] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
   const [manualValues, setManualValues] = useState({
@@ -87,27 +78,66 @@ export function PatientDetails() {
   });
   const lastServerSignatureRef = useRef('');
 
+  // Scoped Security Guard: A patient can ONLY view their own records
+  const isPatientRestricted = isPatient && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase();
+
+  // Reset and load when patientId changes
   useEffect(() => {
     let active = true;
 
+    // IMMEDIATELY reset all previous patient data so nothing stale lingers
+    setPatient(null);
+    setAudit([]);
+    setError('');
+    setAccessDenied(false);
+    setLoading(true);
+
+    if (isPatientRestricted) {
+      setLoading(false);
+      setAccessDenied(true);
+      return;
+    }
+
     const loadPatient = async () => {
-      setLoading(true);
-      setError('');
       try {
         const [patientResponse, auditResponse] = await Promise.all([
           getApiPatientById(patientId),
           getPatientPredictionAudit(patientId),
         ]);
 
-        if (!active) {
-          return;
+        if (!active) return;
+
+        // Verify Doctor Authorization
+        if (isDoctor) {
+          const sessionDocId = String(session?.doctorId || session?.email || '').trim().toLowerCase();
+          const assignedDocId = String(patientResponse?.assignedDoctorId || patientResponse?.doctorId || patientResponse?.doctorEmail || '').trim().toLowerCase();
+          const assignedContactEmail = String(patientResponse?.doctorContact?.email || '').trim().toLowerCase();
+
+          const isAssigned = sessionDocId && (
+            sessionDocId === assignedDocId ||
+            sessionDocId === assignedContactEmail ||
+            (patientResponse?.doctorEmail && sessionDocId === String(patientResponse.doctorEmail).toLowerCase())
+          );
+
+          if (!isAssigned) {
+            setAccessDenied(true);
+            setError('Access Denied: You are not authorized to view or treat this patient. This patient is not assigned under your clinical care.');
+            setPatient(null);
+            return;
+          }
         }
 
         setPatient(patientResponse);
         setAudit(auditResponse);
       } catch (requestError) {
-        if (active) {
-          setError(requestError?.response?.data?.message || requestError?.message || 'Unable to load patient details.');
+        if (!active) return;
+        const statusCode = requestError?.response?.status;
+        const msg = requestError?.response?.data?.message || requestError?.message || 'Unable to load patient details.';
+        if (statusCode === 403 || msg.toLowerCase().includes('access denied')) {
+          setAccessDenied(true);
+          setError('Access Denied: You are not authorized to view or treat this patient. This patient is not assigned under your clinical care.');
+        } else {
+          setError(msg);
         }
       } finally {
         if (active) {
@@ -116,12 +146,14 @@ export function PatientDetails() {
       }
     };
 
-    loadPatient();
+    if (patientId) {
+      loadPatient();
+    }
 
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, isPatientRestricted]);
 
   useEffect(() => {
     if (!patient?.deviceConnected) {
@@ -136,22 +168,16 @@ export function PatientDetails() {
 
     socket.on('patient_snapshot', (payload) => {
       const snapshot = payload?.data;
-      if (!snapshot) {
-        return;
-      }
+      if (!snapshot) return;
       setPatient(snapshot);
     });
 
     socket.on('vitals_update', (payload) => {
       const incomingVitals = payload?.vitals;
-      if (!incomingVitals) {
-        return;
-      }
+      if (!incomingVitals) return;
 
       setPatient((current) => {
-        if (!current) {
-          return current;
-        }
+        if (!current) return current;
         return {
           ...current,
           vitals: incomingVitals,
@@ -162,14 +188,10 @@ export function PatientDetails() {
 
     socket.on('insights_update', (payload) => {
       const incomingPrediction = payload?.prediction;
-      if (!incomingPrediction) {
-        return;
-      }
+      if (!incomingPrediction) return;
 
       setPatient((current) => {
-        if (!current) {
-          return current;
-        }
+        if (!current) return current;
         return {
           ...current,
           prediction: incomingPrediction,
@@ -183,9 +205,7 @@ export function PatientDetails() {
   }, [patientId, patient?.deviceConnected]);
 
   const handleConnect = async () => {
-    if (!patientId) {
-      return;
-    }
+    if (!patientId) return;
     setActionLoading(true);
     setError('');
     try {
@@ -199,9 +219,7 @@ export function PatientDetails() {
   };
 
   const handleDisconnect = async () => {
-    if (!patientId) {
-      return;
-    }
+    if (!patientId) return;
     setActionLoading(true);
     setError('');
     try {
@@ -223,9 +241,7 @@ export function PatientDetails() {
   };
 
   const submitManualUpdate = async (values, mode = 'manual') => {
-    if (!patientId) {
-      return;
-    }
+    if (!patientId) return;
 
     if (mode === 'manual') {
       setActionLoading(true);
@@ -275,20 +291,42 @@ export function PatientDetails() {
     };
   }, [manualValues, isDoctor, patientId, actionLoading, autoSaving]);
 
-  const chartData = useMemo(() => {
-    const rows = Array.isArray(audit) ? audit.slice(-12) : [];
-    return rows.map((entry, index) => ({
-      label: entry.timestamp || `Reading ${index + 1}`,
-      heartRate: Number(entry?.vitals?.heartRate || entry?.vitals?.heart_rate || patient?.vitals?.heartRate || 0),
-      spo2: Number(entry?.vitals?.spo2 || patient?.vitals?.spo2 || 0),
-      temperature: Number(entry?.vitals?.temperature || patient?.vitals?.temperature || 0),
-    }));
-  }, [audit, patient?.vitals]);
-
+  // Loading state
   if (loading) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-white/5 p-8">
-        <Loader label="Loading patient details" />
+      <div className="p-8 max-w-2xl mx-auto my-12 text-center space-y-4">
+        <Loader label="Loading patient data..." />
+        <p className="text-xs text-slate-400 animate-pulse">
+          Establishing isolated clinical workspace for patient {patientId}...
+        </p>
+      </div>
+    );
+  }
+
+  // Access Denied State (Strict isolation)
+  if (accessDenied || isPatientRestricted) {
+    return (
+      <div className="p-6 max-w-2xl mx-auto my-12">
+        <div className="rounded-2xl border border-rose-500/30 bg-rose-500/10 p-8 text-center space-y-4 shadow-xl">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-500/20 text-rose-500">
+            <ShieldAlert className="h-7 w-7" />
+          </div>
+          <h2 className="text-2xl font-bold text-rose-700 dark:text-rose-200">Access Denied</h2>
+          <p className="text-sm text-rose-600/90 dark:text-rose-300/80 max-w-md mx-auto">
+            {isPatient
+              ? 'Patient accounts are strictly scoped to their own personal health records. You cannot view telemetry for other patients.'
+              : 'You are not authorized to view or treat this patient. This patient record is not assigned under your clinical care.'}
+          </p>
+          <div className="pt-2">
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-2 rounded-xl bg-rose-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-rose-700 transition shadow-md"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              {isDoctor ? 'Back to My Patients' : 'Back to My Dashboard'}
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -313,25 +351,64 @@ export function PatientDetails() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        eyebrow="Clinical Patient File"
-        title={patient.name || 'Patient Record'}
-        description={`ID: ${patient.id} · Data Source: ${patient.dataSource || 'dataset'} · Device: ${patient.deviceConnected ? 'Connected' : 'Not connected'}`}
-        action={
-          <Link
-            to="/dashboard"
-            className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-semibold text-slate-200 transition hover:bg-white/10"
-          >
-            <ArrowLeft className="h-4 w-4" />Back to dashboard
-          </Link>
-        }
-      />
+      {/* 1. BREADCRUMB NAVIGATION */}
+      <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <Link to="/dashboard" className="hover:text-blue-500 transition">
+          {isDoctor ? 'Doctor Dashboard' : 'My Dashboard'}
+        </Link>
+        <span>/</span>
+        <Link to="/dashboard#patients" className="hover:text-blue-500 transition">
+          {isDoctor ? 'My Patients' : 'Clinical Care'}
+        </Link>
+        <span>/</span>
+        <span className="font-semibold text-slate-900 dark:text-slate-200">
+          {patient.name}
+        </span>
+      </div>
+
+      {/* 2. VISUAL PATIENT WORKSPACE HEADER */}
+      <div className="rounded-2xl border border-slate-200/80 dark:border-white/10 bg-white/80 dark:bg-slate-900/60 p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="inline-flex items-center gap-1 rounded-md bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                PATIENT WORKSPACE
+              </span>
+              <span className="rounded-md bg-slate-100 dark:bg-slate-800 px-2 py-0.5 font-mono text-xs font-semibold text-slate-600 dark:text-slate-300">
+                {patient.id}
+              </span>
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+              {patient.name}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-500 dark:text-slate-400 pt-0.5">
+              <span>{patient.age || 24} years · {patient.gender || 'Male'}</span>
+              <span>•</span>
+              <span>Status: <strong className="text-slate-700 dark:text-slate-200 capitalize">{status}</strong></span>
+              <span>•</span>
+              <span>Assigned Doctor: <strong className="text-slate-700 dark:text-slate-200">Dr. {attendingDoctor.name}</strong></span>
+              <span>•</span>
+              <span>Device: {patient.deviceConnected ? '● Connected' : '○ Standby'}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            <Link
+              to="/dashboard"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-white/10 bg-white dark:bg-slate-800 px-4 py-2 text-xs font-bold text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700 transition shadow-xs"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back to Patients
+            </Link>
+          </div>
+        </div>
+      </div>
 
       {error ? (
         <Card className="border border-rose-400/20 bg-rose-500/10 p-4 text-sm text-rose-100">{error}</Card>
       ) : null}
 
-      {/* 9 CLINICAL TABS NAVIGATION STRIP */}
+      {/* 3. 10 CLINICAL WORKSPACE TABS */}
       <div className="overflow-x-auto pb-1">
         <nav className="flex items-center gap-1.5 rounded-2xl border border-white/10 bg-slate-900/60 p-1.5 backdrop-blur-md min-w-max">
           {CLINICAL_TABS.map((tab) => {
@@ -364,8 +441,8 @@ export function PatientDetails() {
             <Card className="space-y-5 p-6 md:p-8">
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className="text-sm uppercase tracking-[0.35em] text-slate-400">Status</p>
-                  <h2 className="mt-2 font-display text-3xl font-bold text-white">Current condition</h2>
+                  <p className="text-sm uppercase tracking-[0.35em] text-slate-400">Condition Overview</p>
+                  <h2 className="mt-2 font-display text-3xl font-bold text-white">Current status</h2>
                 </div>
                 <StatusPill status={status} />
               </div>
@@ -384,7 +461,7 @@ export function PatientDetails() {
               </div>
 
               <div className="space-y-3 text-sm leading-7 text-slate-300">
-                <p><span className="text-white">Patient ID:</span> {patient.id}</p>
+                <p><span className="text-white">Patient:</span> {patient.name} ({patient.id})</p>
                 <p><span className="text-white">Risk:</span> {patient?.prediction?.risk ?? patient?.prediction?.status ?? ''}</p>
                 <p><span className="text-white">Confidence:</span> {patient?.prediction?.confidence ?? ''}</p>
                 <p><span className="text-white">Message:</span> {patient?.prediction?.message ?? ''}</p>
@@ -564,6 +641,7 @@ export function PatientDetails() {
         <div className="space-y-6">
           <MedicationManagement
             patientId={patient.id}
+            patientName={patient.name}
             role={session?.role || 'doctor'}
             doctorInfo={attendingDoctor}
           />
@@ -575,13 +653,26 @@ export function PatientDetails() {
         <div className="space-y-6">
           <MedicationManagement
             patientId={patient.id}
+            patientName={patient.name}
             role={session?.role || 'doctor'}
             doctorInfo={attendingDoctor}
           />
         </div>
       )}
 
-      {/* TAB 9: REPORTS */}
+      {/* TAB 9: ADHERENCE */}
+      {activeTab === 'adherence' && (
+        <div className="space-y-6">
+          <MedicationManagement
+            patientId={patient.id}
+            patientName={patient.name}
+            role={session?.role || 'doctor'}
+            doctorInfo={attendingDoctor}
+          />
+        </div>
+      )}
+
+      {/* TAB 10: REPORTS */}
       {activeTab === 'reports' && (
         <div className="space-y-6">
           <Card className="p-6 md:p-8 space-y-4">

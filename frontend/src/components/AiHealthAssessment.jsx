@@ -55,7 +55,11 @@ export function AiHealthAssessment({
   };
 
   useEffect(() => {
-    fetchAssessment();
+    // IMMEDIATELY reset previous assessment when patientId changes to prevent stale data leakage
+    setAssessment(null);
+    if (patientId) {
+      fetchAssessment();
+    }
   }, [patientId, liveVitals?.heartRate, liveVitals?.spo2, liveVitals?.temperature]);
 
   // Merge live vitals if backend telemetry hasn't refreshed yet

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Activity,
@@ -109,6 +109,7 @@ function DashboardBody({ liveVitals }) {
 
   const [activeSection, setActiveSection] = useState('overview');
   const [doctorPatients, setDoctorPatients] = useState([]);
+  const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [profileEmail, setProfileEmail] = useState(session?.email || '');
   const [profilePhone, setProfilePhone] = useState(session?.phone || '');
   const [profileSaving, setProfileSaving] = useState(false);
@@ -124,8 +125,10 @@ function DashboardBody({ liveVitals }) {
 
   // SECURITY FIX: Real assigned patient count without synthetic fallback
   const patientCount = doctorPatients.length;
-  const preferredChatPatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
-  const preferredDevicePatientId = doctorPatients[0]?.id ? String(doctorPatients[0].id) : '';
+  const preferredChatPatientId = isDoctor
+    ? (selectedPatientId || (doctorPatients[0]?.id ? String(doctorPatients[0].id) : ''))
+    : (session?.patientId || patientId || '');
+  const preferredDevicePatientId = preferredChatPatientId;
 
   // Clinical risk label and badge
   const healthStatusLabel = risk ? String(risk) : 'Normal';
@@ -220,11 +223,19 @@ function DashboardBody({ liveVitals }) {
       try {
         const rows = await getPatients();
         if (active) {
-          setDoctorPatients(Array.isArray(rows) ? rows : []);
+          const list = Array.isArray(rows) ? rows : [];
+          setDoctorPatients(list);
+          setSelectedPatientId((prev) => {
+            if (prev && list.some((p) => String(p.id).toLowerCase() === String(prev).toLowerCase())) {
+              return prev;
+            }
+            return list.length > 0 ? list[0].id : null;
+          });
         }
       } catch {
         if (active) {
           setDoctorPatients([]);
+          setSelectedPatientId(null);
         }
       }
     };
@@ -375,20 +386,29 @@ function DashboardBody({ liveVitals }) {
     window.print();
   };
 
-  // SECURITY FIX: Remove hardcoded patient fallback; display real assigned patient or clinical empty state
-  const rawPatientName =
-    patientName ||
-    (Array.isArray(doctorPatients) && doctorPatients.length > 0 && doctorPatients[0]?.name ? doctorPatients[0].name : '') ||
-    (isDoctor ? 'Clinical Ward' : (session?.name || 'Patient'));
+  const selectedPatient = useMemo(() => {
+    if (!isDoctor) return null;
+    if (!selectedPatientId) return doctorPatients[0] || null;
+    return (
+      doctorPatients.find(
+        (p) => String(p.id).toLowerCase() === String(selectedPatientId).toLowerCase()
+      ) || doctorPatients[0] || null
+    );
+  }, [isDoctor, selectedPatientId, doctorPatients]);
+
+  // Selected Patient Details
+  const rawPatientName = isDoctor
+    ? (selectedPatient?.name || (doctorPatients.length > 0 ? doctorPatients[0]?.name : ''))
+    : (patientName || session?.name || 'Patient');
   const currentPatientName = String(rawPatientName || (isDoctor ? 'Clinical Ward' : 'Patient')).trim();
   const currentPatientId = String(
-    patientId ||
-    (Array.isArray(doctorPatients) && doctorPatients.length > 0 ? (doctorPatients[0]?.patientId || doctorPatients[0]?.id) : '') ||
-    (isDoctor ? 'WARD-4B' : 'PT-ACTIVE')
+    isDoctor
+      ? (selectedPatient?.id ? String(selectedPatient.id) : (doctorPatients[0]?.id ? String(doctorPatients[0].id) : ''))
+      : (patientId || session?.patientId || 'PT-ACTIVE')
   );
   const currentLastUpdate = updatedAt || new Date().toLocaleTimeString();
 
-  const activeFirstPatient = isDoctor && Array.isArray(doctorPatients) && doctorPatients.length > 0 ? doctorPatients[0] : null;
+  const activeFirstPatient = isDoctor ? selectedPatient : null;
   const effectiveAge = activeFirstPatient?.age || patientAge || 24;
   const rawGender = activeFirstPatient?.gender || patientGender || 'Male';
   const effectiveGender = rawGender ? (rawGender.charAt(0).toUpperCase() + rawGender.slice(1)) : 'Male';
@@ -937,36 +957,65 @@ function DashboardBody({ liveVitals }) {
               6. AI CONDITION ANALYSIS & FIRST-AID (id="ai-assessment")
              ======================================================= */}
           <section id="ai-assessment" className="scroll-mt-24">
-            <AiHealthAssessment
-              patientId={currentPatientId}
-              liveVitals={{
-                heartRate,
-                spo2,
-                temperature,
-                bloodPressure: '120/80',
-              }}
-              attendingDoctor={{
-                name: attendingDoctorName,
-                phone: attendingDoctorPhone,
-                email: attendingDoctorEmail,
-                specialty: attendingDoctorSpecialty,
-              }}
-            />
+            {isDoctor && !currentPatientId ? (
+              <Card className="p-8 text-center bg-white border border-[#E2E8F0] rounded-[16px] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+                <div className="flex flex-col items-center justify-center gap-2">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-[#64748B]">
+                    <BrainCircuit className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-bold text-[#0F172A]">Select a patient to view clinical AI assessment.</p>
+                  <p className="text-xs text-[#64748B] max-w-sm">
+                    Choose an assigned patient from the roster below to run real-time condition analysis and first-aid recommendations.
+                  </p>
+                </div>
+              </Card>
+            ) : (
+              <AiHealthAssessment
+                patientId={currentPatientId}
+                liveVitals={{
+                  heartRate,
+                  spo2,
+                  temperature,
+                  bloodPressure: '120/80',
+                }}
+                attendingDoctor={{
+                  name: attendingDoctorName,
+                  phone: attendingDoctorPhone,
+                  email: attendingDoctorEmail,
+                  specialty: attendingDoctorSpecialty,
+                }}
+              />
+            )}
           </section>
 
           {/* =======================================================
               7. MEDICATIONS & PRESCRIPTION MANAGEMENT (id="medications")
              ======================================================= */}
           <section id="medications" className="scroll-mt-24">
-            <MedicationManagement
-              patientId={currentPatientId}
-              role={role}
-              doctorInfo={{
-                name: attendingDoctorName,
-                phone: attendingDoctorPhone,
-                email: attendingDoctorEmail,
-              }}
-            />
+            {isDoctor && !currentPatientId ? (
+              <Card className="p-8 text-center bg-white border border-[#E2E8F0] rounded-[16px] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+                <div className="flex flex-col items-center justify-center gap-2">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-[#64748B]">
+                    <Users className="h-6 w-6" />
+                  </div>
+                  <p className="text-sm font-bold text-[#0F172A]">Select a patient to view clinical information.</p>
+                  <p className="text-xs text-[#64748B] max-w-sm">
+                    Choose an assigned patient from the roster below to view their active prescriptions and adherence tracking.
+                  </p>
+                </div>
+              </Card>
+            ) : (
+              <MedicationManagement
+                patientId={currentPatientId}
+                patientName={currentPatientName}
+                role={role}
+                doctorInfo={{
+                  name: attendingDoctorName,
+                  phone: attendingDoctorPhone,
+                  email: attendingDoctorEmail,
+                }}
+              />
+            )}
           </section>
 
           {/* =======================================================
@@ -979,7 +1028,7 @@ function DashboardBody({ liveVitals }) {
               </h3>
               <p className="text-xs text-[#64748B] mt-0.5">
                 {isDoctor
-                  ? 'Real-time telemetry status for patients in your clinical ward'
+                  ? 'Real-time telemetry status for patients in your clinical ward. Click a patient to set active scope or open their dedicated workspace.'
                   : 'Authorized physician and clinical ward telemetry details'}
               </p>
             </div>
@@ -1003,12 +1052,33 @@ function DashboardBody({ liveVitals }) {
                       {doctorPatients.length > 0 ? (
                         doctorPatients.map((pt) => {
                           const isCritical = Number(pt?.spo2 || 0) > 0 && Number(pt?.spo2 || 0) < 90;
+                          const isSelected = String(currentPatientId).toLowerCase() === String(pt.id).toLowerCase();
                           return (
-                            <tr key={pt.id} className="hover:bg-sky-50/30 transition-colors">
-                              <td className="px-5 py-3.5 font-bold text-[#0F172A]">
-                                {pt.name || 'Unnamed Patient'}
+                            <tr
+                              key={pt.id}
+                              onClick={() => setSelectedPatientId(pt.id)}
+                              className={`cursor-pointer transition-colors ${
+                                isSelected
+                                  ? 'bg-sky-50/80 border-l-4 border-l-[#0284C7]'
+                                  : 'hover:bg-slate-50/60'
+                              }`}
+                            >
+                              <td className="px-5 py-3.5">
+                                <div className="flex items-center gap-2">
+                                  <div className="min-w-0">
+                                    <p className="font-bold text-[#0F172A] truncate">{pt.name || 'Unnamed Patient'}</p>
+                                    <p className="text-[11px] text-[#64748B]">
+                                      {pt.age || 24} yrs · {pt.gender || 'Male'}
+                                    </p>
+                                  </div>
+                                  {isSelected && (
+                                    <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[9px] font-bold text-sky-700">
+                                      Active
+                                    </span>
+                                  )}
+                                </div>
                               </td>
-                              <td className="px-5 py-3.5 text-[#64748B] font-mono">{pt.id}</td>
+                              <td className="px-5 py-3.5 text-[#64748B] font-mono text-xs">{pt.id}</td>
                               <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.heartRate || 72} BPM</td>
                               <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.spo2 || 98}%</td>
                               <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.temperature || 36.7}°C</td>
@@ -1021,16 +1091,33 @@ function DashboardBody({ liveVitals }) {
                                   }`}
                                 >
                                   <span className={`h-1.5 w-1.5 rounded-full ${isCritical ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                                  {isCritical ? 'Critical' : 'Normal'}
+                                  {isCritical ? 'Attention' : (pt.heartRate && pt.spo2 ? 'Monitoring' : 'Stable')}
                                 </span>
                               </td>
                               <td className="px-5 py-3.5 text-right">
-                                <Link
-                                  to={`/patients/${pt.id}`}
-                                  className="inline-flex items-center gap-1 font-semibold text-[#0284C7] hover:text-[#0369A1]"
-                                >
-                                  View <ArrowRight className="h-3.5 w-3.5" />
-                                </Link>
+                                <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedPatientId(pt.id);
+                                    }}
+                                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                                      isSelected
+                                        ? 'bg-sky-100 text-sky-700'
+                                        : 'text-[#64748B] hover:bg-slate-100 hover:text-[#0F172A]'
+                                    }`}
+                                  >
+                                    {isSelected ? 'Active Scope' : 'Select'}
+                                  </button>
+                                  <Link
+                                    to={`/doctor/patients/${pt.id}`}
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="inline-flex items-center gap-1 font-semibold text-[#0284C7] hover:text-[#0369A1]"
+                                  >
+                                    Workspace <ArrowRight className="h-3.5 w-3.5" />
+                                  </Link>
+                                </div>
                               </td>
                             </tr>
                           );

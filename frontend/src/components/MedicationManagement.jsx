@@ -26,9 +26,11 @@ import {
   recordAdherence,
   updatePrescriptionStatus,
 } from '../services/api';
+import { getAuthSession } from '../utils/auth';
 
 export function MedicationManagement({
   patientId,
+  patientName = '',
   role = 'patient',
   doctorInfo = null,
   className = '',
@@ -79,7 +81,13 @@ export function MedicationManagement({
   };
 
   useEffect(() => {
-    loadData();
+    // IMMEDIATELY clear previous patient data to prevent any stale data leakage
+    setMedicines([]);
+    setAdherenceData(null);
+    setTimeline([]);
+    if (patientId) {
+      loadData();
+    }
   }, [patientId]);
 
   // Handle Mark as Taken / Status change
@@ -124,6 +132,15 @@ export function MedicationManagement({
   // Doctor Prescribe Submission
   const handlePrescribeSubmit = async (e) => {
     e.preventDefault();
+    const session = getAuthSession();
+    if (!session || session.role !== 'doctor') {
+      toast.error('Unable to create prescription. Doctor authorization is required.');
+      return;
+    }
+    if (!patientId) {
+      toast.error('Unable to create prescription. Please select an authorized patient.');
+      return;
+    }
     if (!prescriptionForm.medicineName.trim() || !prescriptionForm.dosage.trim()) {
       toast.error('Medicine name and dosage are required.');
       return;
@@ -131,7 +148,11 @@ export function MedicationManagement({
 
     setSubmittingPrescription(true);
     try {
-      await createPrescription(patientId, prescriptionForm);
+      await createPrescription(patientId, {
+        ...prescriptionForm,
+        patientId: String(patientId).trim(),
+        patientName: String(patientName || '').trim(),
+      });
       toast.success(`Prescription for ${prescriptionForm.medicineName} created successfully.`);
       setShowPrescribeModal(false);
       setPrescriptionForm({
@@ -148,7 +169,7 @@ export function MedicationManagement({
       });
       await loadData();
     } catch (err) {
-      toast.error(err?.response?.data?.message || err?.message || 'Failed to create prescription.');
+      toast.error(err?.response?.data?.message || err?.message || 'Unable to create prescription. Please select an authorized patient.');
     } finally {
       setSubmittingPrescription(false);
     }
@@ -619,6 +640,24 @@ export function MedicationManagement({
               >
                 <X className="h-5 w-5" />
               </button>
+            </div>
+
+            {/* Read-Only Patient Binding Banner */}
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-3.5 space-y-1">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400">
+                Prescribing for Patient (Locked / Read-Only):
+              </span>
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h4 className="text-base font-bold text-slate-900 dark:text-white">
+                  {patientName || 'Selected Patient'}
+                </h4>
+                <span className="rounded-md bg-white/70 dark:bg-slate-800 px-2.5 py-0.5 font-mono text-xs font-semibold text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-white/10">
+                  {patientId}
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                Authorized Attending Physician: Dr. {doctorInfo?.name || 'Assigned Physician'}
+              </p>
             </div>
 
             <form onSubmit={handlePrescribeSubmit} className="space-y-3">

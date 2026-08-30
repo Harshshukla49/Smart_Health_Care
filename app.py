@@ -555,6 +555,7 @@ def _normalize_medication_record(med, patient_id, default_doc_id='', default_doc
         'id': med_id,
         'medicationId': med_id,
         'patientId': str(med.get('patientId') or patient_id).strip(),
+        'patientName': str(med.get('patientName') or '').strip(),
         'medicineName': med_name,
         'name': med_name,
         'dosage': str(med.get('dosage') or '').strip(),
@@ -824,9 +825,23 @@ def create_patient_prescription(patient_id):
     if not med_name or not dosage:
         return api_error('Medicine name and dosage are required.', 400)
 
+    body_patient_id = str(data.get('patientId') or '').strip()
+    if body_patient_id and body_patient_id.lower() != str(patient_id).strip().lower():
+        return api_error('Prescription patientId does not match the authorized patient workspace.', 400)
+
     auth_payload = _read_auth_payload()
     doc_id = str(auth_payload.get('doctorId') or auth_payload.get('email') or '').strip().lower()
     doc_name = str(auth_payload.get('name') or 'Attending Physician').strip()
+
+    # Verify patient record and doctor assignment
+    patient_record = _patient_collection_reference().child(str(patient_id).strip()).get()
+    if not isinstance(patient_record, dict):
+        return api_error('Patient not found.', 404)
+
+    if not _doctor_owns_record(patient_record, doc_id):
+        return api_error('Unable to create prescription. Please select an authorized patient.', 403)
+
+    patient_name = str(patient_record.get('name') or data.get('patientName') or 'Patient').strip()
 
     medicines, error = _get_patient_medicines(patient_id)
     if error:
@@ -835,6 +850,7 @@ def create_patient_prescription(patient_id):
     new_prescription = {
         'id': f"med-{uuid.uuid4().hex[:8]}",
         'patientId': str(patient_id).strip(),
+        'patientName': patient_name,
         'medicineName': med_name,
         'dosage': dosage,
         'frequency': str(data.get('frequency') or data.get('time') or 'Every 24 hours').strip(),
@@ -3603,8 +3619,18 @@ def get_api_patient(patient_id):
             return api_error('Patient ID is required.', 400)
 
         record = _patient_collection_reference().child(key).get()
-        if not record:
+        if not record or not isinstance(record, dict):
             return api_error('Patient not found.', 404)
+
+        if _request_user_role() == 'doctor':
+            doctor_id = _request_doctor_id()
+            if not _doctor_owns_record(record, doctor_id):
+                return api_error('Access denied for this patient record.', 403)
+
+        if _request_user_role() == 'patient':
+            requester_patient_id = _request_patient_id()
+            if not requester_patient_id or str(requester_patient_id) != str(key):
+                return api_error('Access denied for this patient record.', 403)
 
         if bool((record or {}).get('deviceConnected')):
             normalized_existing = _normalize_patient_record(key, record, record)
