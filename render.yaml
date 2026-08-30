@@ -1,4 +1,4 @@
-﻿services:
+services:
   - type: web
     name: smart-health-backend
     env: python
@@ -26,3 +26,21 @@
     envVars:
       - key: VITE_API_BASE_URL
         value: https://smart-health-backend-2idf.onrender.com
+      - key: VITE_SOS_API_BASE_URL
+        value: https://smart-health-backend-2idf.onrender.com
+      - key: VITE_FIREBASE_API_KEY
+        value: AIzaSyCqlojCmA8TFc5iXqMXXA5PQ5p1fi8um7o
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        value: smart-health-care-cd723.firebaseapp.com
+      - key: VITE_FIREBASE_PROJECT_ID
+        value: smart-health-care-cd723
+      - key: VITE_FIREBASE_APP_ID
+        value: 1:607879480771:web:b4e19a21bf9be9b79e6976
+      - key: VITE_FIREBASE_DATABASE_URL
+        value: https://smart-health-care-cd723-default-rtdb.asia-southeast1.firebasedatabase.app
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        value: smart-health-care-cd723.firebasestorage.app
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        value: "607879480771"
+      - key: VITE_FIREBASE_MEASUREMENT_ID
+        value: G-GWC7VP64LK
