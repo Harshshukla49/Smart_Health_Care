@@ -1,38 +1,3 @@
-// ===================== MEDICINES API =====================
-/**
- * Get medicines for a patient
- * @param {string} patientId
- */
-export const getPatientMedicines = async (patientId) => {
-  const response = await api.get(`/api/patient/${encodeURIComponent(patientId)}/medicines`);
-  const data = unwrapEnvelope(response);
-  return Array.isArray(data?.medicines) ? data.medicines : [];
-};
-
-/**
- * Add a new medicine for a patient
- * @param {string} patientId
- * @param {object} medicineData { name, dosage, time, ... }
- */
-export const addPatientMedicine = async (patientId, medicineData) => {
-  const existingMedicines = await getPatientMedicines(patientId);
-  const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/medicines`, {
-    medicines: [...existingMedicines, medicineData],
-  });
-  return unwrapEnvelope(response);
-};
-
-/**
- * Mark a medicine as taken
- * @param {string} patientId
- * @param {string} medicineId
- */
-export const markMedicineTaken = async (patientId, medicineId) => {
-  const response = await api.post(`/api/patient/${encodeURIComponent(patientId)}/medicines/${encodeURIComponent(medicineId)}/taken`, {
-    taken: true,
-  });
-  return unwrapEnvelope(response);
-};
 import axios from 'axios';
 import { fallbackPatients } from '../data/demoData';
 import { getAuthSession } from '../utils/auth';
@@ -759,3 +724,96 @@ export const submitContactMessage = async (formData) => {
 };
 
 export const getFallbackPatients = () => getFallbackPatientList();
+
+// ===================== MEDICATIONS, PRESCRIPTIONS & ADHERENCE API =====================
+
+/**
+ * Get all medicines/prescriptions for a patient
+ */
+export const getPatientMedicines = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/medicines`);
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.medicines) ? data.medicines : [];
+};
+
+/**
+ * Create a new doctor prescription (Doctor only)
+ */
+export const createPrescription = async (patientId, prescriptionData) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(toText(patientId))}/prescriptions`, prescriptionData);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Backward-compatible alias for addPatientMedicine
+ */
+export const addPatientMedicine = async (patientId, medicineData) => {
+  return createPrescription(patientId, medicineData);
+};
+
+/**
+ * Update an existing prescription (Doctor only)
+ */
+export const updatePrescription = async (patientId, medicationId, updateData) => {
+  const response = await api.put(
+    `/api/patient/${encodeURIComponent(toText(patientId))}/prescriptions/${encodeURIComponent(toText(medicationId))}`,
+    updateData
+  );
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Update prescription status (Active, Paused, Completed, Discontinued)
+ */
+export const updatePrescriptionStatus = async (patientId, medicationId, status) => {
+  const response = await api.post(
+    `/api/patient/${encodeURIComponent(toText(patientId))}/prescriptions/${encodeURIComponent(toText(medicationId))}/status`,
+    { status }
+  );
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Mark a medicine dose as taken (Patient or Doctor)
+ */
+export const markMedicineTaken = async (patientId, medicineId, taken = true) => {
+  const response = await api.post(
+    `/api/patient/${encodeURIComponent(toText(patientId))}/medicines/${encodeURIComponent(toText(medicineId))}/taken`,
+    { taken }
+  );
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Record a specific adherence dose event (Taken, Missed, Skipped)
+ */
+export const recordAdherence = async (patientId, payload) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(toText(patientId))}/adherence`, payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Get adherence analytics (today's summary & weekly 7-day history)
+ */
+export const getPatientAdherence = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/adherence`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Get unified clinical medication timeline
+ */
+export const getMedicationTimeline = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/medication-timeline`);
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.timeline) ? data.timeline : [];
+};
+
+/**
+ * Get explainable AI condition analysis & dynamic first-aid guidance
+ */
+export const getAiAssessment = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/ai-assessment`);
+  return unwrapEnvelope(response);
+};
+

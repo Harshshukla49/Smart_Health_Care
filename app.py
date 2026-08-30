@@ -500,7 +500,81 @@ def send_html_email(to_email, subject, html_body):
                 pass
 
 
-# --- Medicines Storage Helper ---
+# --- Medicines, Prescriptions, Adherence, and Audit Helpers ---
+
+def _prescription_collection_reference(patient_id):
+    return _patient_collection_reference().child(str(patient_id).strip()).child('medicines')
+
+
+def _adherence_collection_reference(patient_id):
+    return _patient_collection_reference().child(str(patient_id).strip()).child('medication_adherence')
+
+
+def _audit_collection_reference(patient_id):
+    return _patient_collection_reference().child(str(patient_id).strip()).child('medication_audit')
+
+
+def _record_medication_audit(patient_id, action, medication_id=None, details=None):
+    try:
+        actor_role = _request_user_role() or 'system'
+        actor_id = _request_doctor_id() if actor_role == 'doctor' else (_request_patient_id() or 'patient')
+        audit_entry = {
+            'id': f"aud-{uuid.uuid4().hex[:10]}",
+            'patientId': str(patient_id).strip(),
+            'medicationId': str(medication_id or '').strip(),
+            'action': str(action).strip(),
+            'performedBy': str(actor_id).strip(),
+            'performedByRole': str(actor_role).strip(),
+            'timestamp': _utc_now_iso(),
+            'details': str(details or '').strip(),
+        }
+        ref = _audit_collection_reference(patient_id)
+        current = ref.get()
+        if not isinstance(current, list):
+            current = list(current.values()) if isinstance(current, dict) else []
+        current.append(audit_entry)
+        if len(current) > 200:
+            current = current[-200:]
+        ref.set(current)
+        return audit_entry
+    except Exception as e:
+        print(f"[Audit Log Error] {e}")
+        return None
+
+
+def _normalize_medication_record(med, patient_id, default_doc_id='', default_doc_name=''):
+    if not isinstance(med, dict):
+        return {}
+    med_id = str(med.get('id') or med.get('medicationId') or f"med-{uuid.uuid4().hex[:8]}").strip()
+    status = str(med.get('status') or 'Active').strip().capitalize()
+    if status not in {'Active', 'Completed', 'Paused', 'Discontinued'}:
+        status = 'Active'
+
+    med_name = str(med.get('medicineName') or med.get('name') or '').strip()
+    return {
+        'id': med_id,
+        'medicationId': med_id,
+        'patientId': str(med.get('patientId') or patient_id).strip(),
+        'medicineName': med_name,
+        'name': med_name,
+        'dosage': str(med.get('dosage') or '').strip(),
+        'frequency': str(med.get('frequency') or med.get('time') or 'Every 24 hours').strip(),
+        'route': str(med.get('route') or 'Oral').strip(),
+        'instructions': str(med.get('instructions') or 'Take as prescribed').strip(),
+        'foodInstruction': str(med.get('foodInstruction') or 'After food').strip(),
+        'startDate': str(med.get('startDate') or _utc_now_iso()[:10]).strip(),
+        'endDate': str(med.get('endDate') or '').strip(),
+        'duration': str(med.get('duration') or '').strip(),
+        'status': status,
+        'notes': str(med.get('notes') or '').strip(),
+        'prescribedByDoctorId': str(med.get('prescribedByDoctorId') or med.get('doctorId') or default_doc_id).strip(),
+        'prescribedByDoctorName': str(med.get('prescribedByDoctorName') or med.get('doctorName') or default_doc_name).strip(),
+        'createdAt': str(med.get('createdAt') or _utc_now_iso()),
+        'updatedAt': str(med.get('updatedAt') or _utc_now_iso()),
+        'taken': bool(med.get('taken', False)),
+        'takenAt': str(med.get('takenAt') or ''),
+    }
+
 
 def _get_patient_medicines(patient_id):
     key = str(patient_id or '').strip()
@@ -509,12 +583,17 @@ def _get_patient_medicines(patient_id):
     record = _patient_collection_reference().child(key).get()
     if not record:
         return None, 'Patient not found.'
-    medicines = record.get('medicines', [])
-    # Ensure each medicine has an id
-    for idx, med in enumerate(medicines):
-        if 'id' not in med:
-            med['id'] = str(idx)
+
+    raw_medicines = record.get('medicines', [])
+    if not isinstance(raw_medicines, list):
+        raw_medicines = list(raw_medicines.values()) if isinstance(raw_medicines, dict) else []
+
+    doc_id = str(record.get('assignedDoctorId') or record.get('doctorId') or record.get('doctorEmail') or '').strip()
+    doc_name = str(record.get('assignedDoctorName') or record.get('doctorName') or 'Attending Physician').strip()
+
+    medicines = [_normalize_medication_record(m, key, doc_id, doc_name) for m in raw_medicines if isinstance(m, dict)]
     return medicines, None
+
 
 def _set_patient_medicines(patient_id, medicines):
     key = str(patient_id or '').strip()
@@ -527,66 +606,559 @@ def _set_patient_medicines(patient_id, medicines):
     ref.update({'medicines': medicines})
     return True, None
 
-# --- API: Patient Medicines ---
-@app.route('/api/patient/<patient_id>/medicines', methods=['GET', 'POST'])
+
+def _calculate_patient_adherence(patient_id):
+    ref = _adherence_collection_reference(patient_id)
+    adherence_data = ref.get()
+    if not isinstance(adherence_data, list):
+        adherence_data = list(adherence_data.values()) if isinstance(adherence_data, dict) else []
+
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    today_records = [rec for rec in adherence_data if str(rec.get('date') or str(rec.get('takenAt', ''))[:10]) == today_str]
+
+    medicines, _ = _get_patient_medicines(patient_id)
+    active_meds = [m for m in (medicines or []) if str(m.get('status', 'Active')).lower() == 'active']
+
+    taken_count = sum(1 for r in today_records if str(r.get('status', '')).lower() == 'taken')
+    missed_count = sum(1 for r in today_records if str(r.get('status', '')).lower() == 'missed')
+    skipped_count = sum(1 for r in today_records if str(r.get('status', '')).lower() == 'skipped')
+    total_scheduled = max(len(active_meds), len(today_records), 1)
+    pending_count = max(0, total_scheduled - taken_count - missed_count - skipped_count)
+
+    rate = round((taken_count / total_scheduled) * 100, 1) if total_scheduled > 0 else 100.0
+
+    weekly = []
+    now = datetime.now(timezone.utc)
+    for i in range(6, -1, -1):
+        day_date = now - timedelta(days=i)
+        d_str = day_date.strftime('%Y-%m-%d')
+        d_name = day_date.strftime('%a')
+        d_records = [rec for rec in adherence_data if str(rec.get('date') or str(rec.get('takenAt', ''))[:10]) == d_str]
+        d_taken = sum(1 for r in d_records if str(r.get('status', '')).lower() == 'taken')
+        d_total = max(len(active_meds), len(d_records), 1)
+        d_pct = min(100, round((d_taken / d_total) * 100)) if d_total > 0 else 100
+        weekly.append({
+            'date': d_str,
+            'day': d_name,
+            'taken': d_taken,
+            'total': d_total,
+            'percentage': d_pct,
+        })
+
+    return {
+        'today': {
+            'date': today_str,
+            'taken': taken_count,
+            'pending': pending_count,
+            'missed': missed_count,
+            'skipped': skipped_count,
+            'totalScheduled': total_scheduled,
+            'adherenceRate': rate,
+        },
+        'weekly': weekly,
+        'history': adherence_data[-50:],
+    }
+
+
+def _generate_ai_condition_analysis(patient_id, record=None):
+    if not record:
+        record = _patient_collection_reference().child(str(patient_id).strip()).get() or {}
+
+    vitals = record.get('vitals', {}) if isinstance(record.get('vitals'), dict) else {}
+    hr = float(vitals.get('heart_rate') or record.get('heart_rate') or 75.0)
+    spo2 = float(vitals.get('spo2') or record.get('spo2') or 98.0)
+    temp = float(vitals.get('temperature') or record.get('temperature') or 36.8)
+    bp_sys = float(record.get('systolicBP') or 120.0)
+    bp_dia = float(record.get('diastolicBP') or 80.0)
+
+    prediction = predict_risk({'heart_rate': hr, 'spo2': spo2, 'temperature': temp})
+    ml_risk = str(prediction.get('risk') or 'Low').strip().capitalize()
+    ml_score = float(prediction.get('risk_score') or 0.15)
+
+    findings = []
+    immediate_steps = []
+    is_emergency = False
+    status_level = 'Normal'
+
+    # Heart Rate Evaluation
+    if hr > 140:
+        findings.append(f"Critical tachycardia: Heart rate ({hr:.0f} bpm) is dangerously above resting range (60-100 bpm).")
+        status_level = 'Emergency'
+        is_emergency = True
+    elif hr > 105:
+        findings.append(f"Elevated heart rate: Heart rate ({hr:.0f} bpm) is elevated compared with normal resting threshold (60-100 bpm).")
+        if status_level != 'Emergency': status_level = 'Attention'
+    elif hr < 50:
+        findings.append(f"Bradycardia detected: Heart rate ({hr:.0f} bpm) is significantly below the typical resting baseline.")
+        if status_level != 'Emergency': status_level = 'Attention'
+    else:
+        findings.append(f"Resting heart rate ({hr:.0f} bpm) is within normal clinical limits (60-100 bpm).")
+
+    # SpO2 Evaluation
+    if spo2 < 88:
+        findings.append(f"Severe hypoxemia: Oxygen saturation ({spo2:.1f}%) has fallen below critical safety threshold (90%).")
+        status_level = 'Emergency'
+        is_emergency = True
+    elif spo2 < 94:
+        findings.append(f"Sub-optimal oxygen saturation: SpO2 ({spo2:.1f}%) is below optimal target (≥ 95%).")
+        if status_level != 'Emergency': status_level = 'Attention'
+    else:
+        findings.append(f"Oxygen saturation ({spo2:.1f}%) is within healthy physiological range (95-100%).")
+
+    # Temperature Evaluation
+    if temp > 39.5:
+        findings.append(f"High pyrexia: Body temperature ({temp:.1f}°C) indicates severe fever requiring immediate attention.")
+        status_level = 'Emergency'
+        is_emergency = True
+    elif temp > 37.8:
+        findings.append(f"Elevated body temperature: Core temperature ({temp:.1f}°C) indicates low-to-moderate fever.")
+        if status_level != 'Emergency': status_level = 'Attention'
+    elif temp < 35.5:
+        findings.append(f"Subnormal temperature: Core temperature ({temp:.1f}°C) suggests mild hypothermia.")
+        if status_level != 'Emergency': status_level = 'Attention'
+    else:
+        findings.append(f"Body temperature ({temp:.1f}°C) is within normal homeostatic range (36.5-37.5°C).")
+
+    # Blood Pressure Evaluation
+    if bp_sys >= 180 or bp_dia >= 120:
+        findings.append(f"Hypertensive urgency/crisis: Blood pressure ({bp_sys:.0f}/{bp_dia:.0f} mmHg) is severely elevated.")
+        status_level = 'Emergency'
+        is_emergency = True
+    elif bp_sys >= 140 or bp_dia >= 90:
+        findings.append(f"Elevated blood pressure ({bp_sys:.0f}/{bp_dia:.0f} mmHg) indicates stage 2 hypertension.")
+        if status_level not in {'Emergency', 'Urgent'}: status_level = 'Attention'
+
+    # Risk level mapping
+    if is_emergency or status_level == 'Emergency':
+        status_level = 'Emergency'
+        risk_level = 'Critical Attention'
+    elif status_level == 'Urgent' or ml_risk == 'High':
+        status_level = 'Urgent'
+        risk_level = 'High Attention'
+    elif status_level == 'Attention' or ml_risk == 'Medium':
+        status_level = 'Attention'
+        risk_level = 'Moderate Attention'
+    else:
+        status_level = 'Normal'
+        risk_level = 'Low Attention'
+
+    # Actionable First-Aid Steps based on identified condition
+    if is_emergency:
+        immediate_steps = [
+            "Cease all physical exertion and sit or recline safely in a supported upright posture.",
+            "Initiate emergency protocol: Alert caregivers and prepare to contact local emergency services.",
+            "Ensure airway remains open; loosen restrictive clothing around neck and chest.",
+            "Do not consume solid foods or unprescribed medications while awaiting medical assessment.",
+        ]
+    elif hr > 105:
+        immediate_steps = [
+            "Stop strenuous activity and rest quietly in a cool, seated position.",
+            "Practice steady, slow diaphragmatic breathing (4 seconds in, 4 seconds out).",
+            "Remain hydrated with small sips of room-temperature water if swallowing easily.",
+            "Re-evaluate heart rate telemetry in 5-10 minutes; contact doctor if palpitations persist.",
+        ]
+    elif spo2 < 94:
+        immediate_steps = [
+            "Sit upright immediately to optimize chest expansion and oxygenation.",
+            "Inspect the oximeter sensor placement, clean fingertip, and verify sensor stability.",
+            "Breathe slowly and deeply through your nose, exhaling gently through pursed lips.",
+            "Notify your assigned physician if low oxygen readings or shortness of breath continue.",
+        ]
+    elif temp > 37.8:
+        immediate_steps = [
+            "Rest in a comfortably ventilated room with lightweight, breathable clothing.",
+            "Maintain fluid hydration with water or electrolyte solutions as tolerated.",
+            "Apply a cool, damp compress to the forehead or neck for non-pharmacological comfort.",
+            "Monitor body temperature every 30-60 minutes and report persistent fever to your care team.",
+        ]
+    else:
+        immediate_steps = [
+            "Continue regular daily activities and maintain adequate daily hydration.",
+            "Keep continuous telemetry sensors securely attached for reliable baseline tracking.",
+            "Take doctor-prescribed medications according to your specified daily schedule.",
+            "Contact your healthcare professional for routine follow-up or if unexpected symptoms develop.",
+        ]
+
+    emergency_warning = None
+    if is_emergency:
+        emergency_warning = "CRITICAL ALERT: Vital signs have crossed clinical safety thresholds. Immediate medical evaluation or emergency assistance may be required."
+
+    return {
+        'overallStatus': status_level,
+        'riskLevel': risk_level,
+        'keyFindings': findings,
+        'immediateSteps': immediate_steps,
+        'isEmergency': is_emergency,
+        'emergencyWarning': emergency_warning,
+        'telemetry': {
+            'heartRate': hr,
+            'spo2': spo2,
+            'temperature': temp,
+            'bloodPressure': f"{int(bp_sys)}/{int(bp_dia)}",
+            'mlRiskScore': round(ml_score, 4),
+            'mlRiskLabel': ml_risk,
+        },
+        'disclaimer': "AI-assisted clinical decision support. Requires clinical review. Does not constitute a medical diagnosis or prescription.",
+        'evaluatedAt': _utc_now_iso(),
+    }
+
+
+# ==================== API: Patient Medicines & Prescriptions ====================
+
+@app.route('/api/patient/<patient_id>/medicines', methods=['GET'])
 @require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
-def patient_medicines(patient_id):
-    if request.method == 'GET':
-        medicines, error = _get_patient_medicines(patient_id)
-        if error:
-            return api_error(error, 404)
-        return api_success('Medicines fetched successfully.', {'medicines': medicines})
-
-    if request.method == 'POST':
-        # Only allow doctor to add/update medicines
-        if _request_user_role() != 'doctor':
-            return api_error('Only doctor can update medicines.', 403)
-        data = request.get_json(silent=True) or {}
-        medicines = data.get('medicines')
-        if not isinstance(medicines, list):
-            return api_error('Medicines must be a list.', 400)
-        # Assign IDs if missing
-        for idx, med in enumerate(medicines):
-            if 'id' not in med:
-                med['id'] = str(idx)
-        ok, error = _set_patient_medicines(patient_id, medicines)
-        if not ok:
-            return api_error(error, 404)
-        return api_success('Medicines updated.', {'medicines': medicines})
+def get_patient_medicines_api(patient_id):
+    medicines, error = _get_patient_medicines(patient_id)
+    if error:
+        return api_error(error, 404)
+    return api_success('Medicines fetched successfully.', {'medicines': medicines})
 
 
-@app.route('/api/patient/<patient_id>/medicines/<medicine_id>/taken', methods=['POST'])
-@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
-def mark_patient_medicine_taken(patient_id, medicine_id):
-    if request.method != 'POST':
-        return api_error('Method not allowed.', 405)
+@app.route('/api/patient/<patient_id>/prescriptions', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
+def create_patient_prescription(patient_id):
+    data = request.get_json(silent=True) or {}
+    med_name = str(data.get('medicineName') or data.get('name') or '').strip()
+    dosage = str(data.get('dosage') or '').strip()
+
+    if not med_name or not dosage:
+        return api_error('Medicine name and dosage are required.', 400)
+
+    auth_payload = _read_auth_payload()
+    doc_id = str(auth_payload.get('doctorId') or auth_payload.get('email') or '').strip().lower()
+    doc_name = str(auth_payload.get('name') or 'Attending Physician').strip()
 
     medicines, error = _get_patient_medicines(patient_id)
     if error:
         return api_error(error, 404)
 
+    new_prescription = {
+        'id': f"med-{uuid.uuid4().hex[:8]}",
+        'patientId': str(patient_id).strip(),
+        'medicineName': med_name,
+        'dosage': dosage,
+        'frequency': str(data.get('frequency') or data.get('time') or 'Every 24 hours').strip(),
+        'route': str(data.get('route') or 'Oral').strip(),
+        'instructions': str(data.get('instructions') or 'Take as directed').strip(),
+        'foodInstruction': str(data.get('foodInstruction') or 'After food').strip(),
+        'startDate': str(data.get('startDate') or _utc_now_iso()[:10]).strip(),
+        'endDate': str(data.get('endDate') or '').strip(),
+        'duration': str(data.get('duration') or '').strip(),
+        'status': 'Active',
+        'notes': str(data.get('notes') or '').strip(),
+        'prescribedByDoctorId': doc_id,
+        'prescribedByDoctorName': doc_name,
+        'createdAt': _utc_now_iso(),
+        'updatedAt': _utc_now_iso(),
+        'taken': False,
+    }
+
+    normalized = _normalize_medication_record(new_prescription, patient_id, doc_id, doc_name)
+    medicines.append(normalized)
+
+    ok, write_error = _set_patient_medicines(patient_id, medicines)
+    if not ok:
+        return api_error(write_error, 500)
+
+    _record_medication_audit(
+        patient_id,
+        action='prescription_created',
+        medication_id=normalized['id'],
+        details=f"Prescribed {med_name} {dosage} ({normalized['frequency']}) by Dr. {doc_name}",
+    )
+
+    return api_success('Prescription created successfully.', {'prescription': normalized, 'medicines': medicines})
+
+
+@app.route('/api/patient/<patient_id>/prescriptions/<medication_id>', methods=['PUT'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
+def update_patient_prescription(patient_id, medication_id):
+    medicines, error = _get_patient_medicines(patient_id)
+    if error:
+        return api_error(error, 404)
+
+    target_idx = None
+    for idx, med in enumerate(medicines):
+        if str(med.get('id', '')).strip() == str(medication_id).strip():
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        return api_error('Prescription not found.', 404)
+
+    data = request.get_json(silent=True) or {}
+    existing = medicines[target_idx]
+
+    updated_status = str(data.get('status') or existing.get('status') or 'Active').strip().capitalize()
+    if updated_status not in {'Active', 'Completed', 'Paused', 'Discontinued'}:
+        updated_status = existing.get('status')
+
+    existing['medicineName'] = str(data.get('medicineName') or existing.get('medicineName') or '').strip()
+    existing['dosage'] = str(data.get('dosage') or existing.get('dosage') or '').strip()
+    existing['frequency'] = str(data.get('frequency') or existing.get('frequency') or '').strip()
+    existing['route'] = str(data.get('route') or existing.get('route') or 'Oral').strip()
+    existing['instructions'] = str(data.get('instructions') or existing.get('instructions') or '').strip()
+    existing['foodInstruction'] = str(data.get('foodInstruction') or existing.get('foodInstruction') or '').strip()
+    existing['startDate'] = str(data.get('startDate') or existing.get('startDate') or '').strip()
+    existing['endDate'] = str(data.get('endDate') or existing.get('endDate') or '').strip()
+    existing['duration'] = str(data.get('duration') or existing.get('duration') or '').strip()
+    existing['notes'] = str(data.get('notes') or existing.get('notes') or '').strip()
+    existing['status'] = updated_status
+    existing['updatedAt'] = _utc_now_iso()
+
+    normalized = _normalize_medication_record(existing, patient_id)
+    medicines[target_idx] = normalized
+
+    ok, write_error = _set_patient_medicines(patient_id, medicines)
+    if not ok:
+        return api_error(write_error, 500)
+
+    _record_medication_audit(
+        patient_id,
+        action=f"prescription_updated_status_{updated_status.lower()}",
+        medication_id=medication_id,
+        details=f"Updated {normalized['medicineName']} status to {updated_status}",
+    )
+
+    return api_success('Prescription updated successfully.', {'prescription': normalized, 'medicines': medicines})
+
+
+@app.route('/api/patient/<patient_id>/prescriptions/<medication_id>/status', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
+def update_prescription_status(patient_id, medication_id):
+    data = request.get_json(silent=True) or {}
+    new_status = str(data.get('status') or '').strip().capitalize()
+    if new_status not in {'Active', 'Completed', 'Paused', 'Discontinued'}:
+        return api_error('Status must be Active, Completed, Paused, or Discontinued.', 400)
+
+    medicines, error = _get_patient_medicines(patient_id)
+    if error:
+        return api_error(error, 404)
+
+    target_idx = None
+    for idx, med in enumerate(medicines):
+        if str(med.get('id', '')).strip() == str(medication_id).strip():
+            target_idx = idx
+            break
+
+    if target_idx is None:
+        return api_error('Prescription not found.', 404)
+
+    medicines[target_idx]['status'] = new_status
+    medicines[target_idx]['updatedAt'] = _utc_now_iso()
+
+    ok, write_error = _set_patient_medicines(patient_id, medicines)
+    if not ok:
+        return api_error(write_error, 500)
+
+    _record_medication_audit(
+        patient_id,
+        action=f"medication_{new_status.lower()}",
+        medication_id=medication_id,
+        details=f"Changed status of {medicines[target_idx].get('medicineName')} to {new_status}",
+    )
+
+    return api_success(f'Prescription marked as {new_status}.', {'prescription': medicines[target_idx], 'medicines': medicines})
+
+
+@app.route('/api/patient/<patient_id>/medicines/<medicine_id>/taken', methods=['POST'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def mark_patient_medicine_taken(patient_id, medicine_id):
+    medicines, error = _get_patient_medicines(patient_id)
+    if error:
+        return api_error(error, 404)
+
     payload = request.get_json(silent=True) or {}
-    taken_value = payload.get('taken')
-    if not isinstance(taken_value, bool):
-        return api_error('Field "taken" is required and must be a boolean.', 400)
-    taken = taken_value
+    taken = bool(payload.get('taken', True))
+    taken_at = _utc_now_iso()
 
     updated = False
+    target_med = None
     for medicine in medicines:
         if str(medicine.get('id', '')).strip() == str(medicine_id).strip():
             medicine['taken'] = taken
-            medicine['takenAt'] = _utc_now_iso()
+            medicine['takenAt'] = taken_at if taken else ''
+            medicine['updatedAt'] = taken_at
+            target_med = medicine
             updated = True
             break
 
-    if not updated:
+    if not updated or not target_med:
         return api_error('Medicine not found.', 404)
 
     ok, write_error = _set_patient_medicines(patient_id, medicines)
     if not ok:
-        return api_error(write_error, 404)
+        return api_error(write_error, 500)
 
-    return api_success('Medicine status updated.', {'medicines': medicines})
+    # Record adherence entry
+    actor_role = _request_user_role() or 'patient'
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    adherence_entry = {
+        'id': f"adh-{uuid.uuid4().hex[:10]}",
+        'patientId': str(patient_id).strip(),
+        'medicationId': str(medicine_id).strip(),
+        'medicineName': target_med.get('medicineName') or target_med.get('name') or '',
+        'dosage': target_med.get('dosage') or '',
+        'doseSchedule': target_med.get('frequency') or 'Scheduled dose',
+        'scheduledTime': datetime.now(timezone.utc).strftime('%I:%M %p'),
+        'takenAt': taken_at if taken else '',
+        'status': 'Taken' if taken else 'Pending',
+        'recordedBy': actor_role,
+        'date': today_str,
+        'createdAt': taken_at,
+    }
+
+    ref = _adherence_collection_reference(patient_id)
+    current_adh = ref.get()
+    if not isinstance(current_adh, list):
+        current_adh = list(current_adh.values()) if isinstance(current_adh, dict) else []
+    current_adh.append(adherence_entry)
+    ref.set(current_adh[-200:])
+
+    _record_medication_audit(
+        patient_id,
+        action='dose_marked_taken' if taken else 'dose_marked_pending',
+        medication_id=medicine_id,
+        details=f"Dose of {target_med.get('medicineName')} marked as {'Taken' if taken else 'Pending'}",
+    )
+
+    adherence_summary = _calculate_patient_adherence(patient_id)
+
+    return api_success('Medicine status updated.', {
+        'medicine': target_med,
+        'medicines': medicines,
+        'adherence': adherence_summary,
+    })
+
+
+@app.route('/api/patient/<patient_id>/adherence', methods=['GET', 'POST'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def patient_adherence_api(patient_id):
+    if request.method == 'GET':
+        adherence_summary = _calculate_patient_adherence(patient_id)
+        return api_success('Adherence data retrieved.', adherence_summary)
+
+    data = request.get_json(silent=True) or {}
+    med_id = str(data.get('medicationId') or '').strip()
+    status = str(data.get('status') or 'Taken').strip().capitalize()
+    if status not in {'Taken', 'Missed', 'Skipped', 'Pending'}:
+        status = 'Taken'
+
+    medicines, _ = _get_patient_medicines(patient_id)
+    target_med = next((m for m in (medicines or []) if str(m.get('id')) == med_id), None)
+    med_name = target_med.get('medicineName') if target_med else str(data.get('medicineName') or 'Medication')
+    dosage = target_med.get('dosage') if target_med else str(data.get('dosage') or '')
+
+    now_iso = _utc_now_iso()
+    today_str = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    actor_role = _request_user_role() or 'patient'
+
+    adherence_entry = {
+        'id': f"adh-{uuid.uuid4().hex[:10]}",
+        'patientId': str(patient_id).strip(),
+        'medicationId': med_id,
+        'medicineName': med_name,
+        'dosage': dosage,
+        'doseSchedule': str(data.get('doseSchedule') or 'Daily dose').strip(),
+        'scheduledTime': str(data.get('scheduledTime') or datetime.now(timezone.utc).strftime('%I:%M %p')).strip(),
+        'takenAt': now_iso if status == 'Taken' else '',
+        'status': status,
+        'recordedBy': actor_role,
+        'date': today_str,
+        'createdAt': now_iso,
+    }
+
+    ref = _adherence_collection_reference(patient_id)
+    current_adh = ref.get()
+    if not isinstance(current_adh, list):
+        current_adh = list(current_adh.values()) if isinstance(current_adh, dict) else []
+    current_adh.append(adherence_entry)
+    ref.set(current_adh[-200:])
+
+    # If status is Taken, also update the medicine record
+    if target_med and status == 'Taken':
+        target_med['taken'] = True
+        target_med['takenAt'] = now_iso
+        _set_patient_medicines(patient_id, medicines)
+
+    _record_medication_audit(
+        patient_id,
+        action=f"dose_marked_{status.lower()}",
+        medication_id=med_id,
+        details=f"Dose of {med_name} marked as {status}",
+    )
+
+    adherence_summary = _calculate_patient_adherence(patient_id)
+    return api_success(f'Dose marked as {status}.', adherence_summary)
+
+
+@app.route('/api/patient/<patient_id>/medication-timeline', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def get_medication_timeline(patient_id):
+    medicines, _ = _get_patient_medicines(patient_id)
+    ref_adh = _adherence_collection_reference(patient_id)
+    adherence_data = ref_adh.get()
+    if not isinstance(adherence_data, list):
+        adherence_data = list(adherence_data.values()) if isinstance(adherence_data, dict) else []
+
+    ref_audit = _audit_collection_reference(patient_id)
+    audit_data = ref_audit.get()
+    if not isinstance(audit_data, list):
+        audit_data = list(audit_data.values()) if isinstance(audit_data, dict) else []
+
+    timeline = []
+
+    # Prescription events
+    for med in (medicines or []):
+        created_at = med.get('createdAt') or _utc_now_iso()
+        doc_name = med.get('prescribedByDoctorName') or 'Doctor'
+        timeline.append({
+            'type': 'prescription_created',
+            'timestamp': created_at,
+            'title': f"{med.get('medicineName')} {med.get('dosage')}",
+            'description': f"Prescribed by Dr. {doc_name} ({med.get('frequency')}, {med.get('foodInstruction')})",
+            'status': med.get('status'),
+            'category': 'prescription',
+        })
+        if med.get('status') in {'Paused', 'Discontinued', 'Completed'}:
+            timeline.append({
+                'type': f"prescription_{med.get('status').lower()}",
+                'timestamp': med.get('updatedAt') or created_at,
+                'title': f"{med.get('medicineName')} {med.get('status')}",
+                'description': f"Treatment status changed to {med.get('status')}",
+                'status': med.get('status'),
+                'category': 'status_change',
+            })
+
+    # Adherence events
+    for adh in adherence_data:
+        t_stamp = adh.get('takenAt') or adh.get('createdAt') or _utc_now_iso()
+        status = adh.get('status', 'Taken')
+        time_str = adh.get('scheduledTime') or ''
+        timeline.append({
+            'type': f"dose_{status.lower()}",
+            'timestamp': t_stamp,
+            'title': f"{adh.get('medicineName')} {adh.get('dosage')}",
+            'description': f"Dose {status.lower()} at {time_str}" if time_str else f"Dose {status.lower()}",
+            'status': status,
+            'category': 'adherence',
+        })
+
+    # Sort descending by timestamp
+    timeline.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+
+    return api_success('Timeline retrieved.', {'timeline': timeline[:100]})
+
+
+@app.route('/api/patient/<patient_id>/ai-assessment', methods=['GET'])
+@require_auth(roles={'doctor', 'patient'}, patient_id_arg='patient_id')
+def get_patient_ai_assessment(patient_id):
+    record = _patient_collection_reference().child(str(patient_id).strip()).get()
+    if not record:
+        return api_error('Patient not found.', 404)
+
+    assessment = _generate_ai_condition_analysis(patient_id, record)
+    return api_success('AI assessment generated.', assessment)
 
 @app.errorhandler(400)
 def handle_bad_request(error):

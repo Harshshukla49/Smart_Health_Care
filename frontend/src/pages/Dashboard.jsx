@@ -61,6 +61,8 @@ import { LocationConsentModal } from '../components/emergency/LocationConsentMod
 import { EmergencyBannerModal } from '../components/emergency/EmergencyBannerModal';
 import { DoctorEmergencyCenter } from '../components/emergency/DoctorEmergencyCenter';
 import { EmergencyMap } from '../components/emergency/EmergencyMap';
+import { AiHealthAssessment } from '../components/AiHealthAssessment';
+import { MedicationManagement } from '../components/MedicationManagement';
 
 export function Dashboard() {
   return (
@@ -932,7 +934,43 @@ function DashboardBody({ liveVitals }) {
           />
 
           {/* =======================================================
-              7. PATIENTS ROSTER & CARE TEAM (id="patients")
+              6. AI CONDITION ANALYSIS & FIRST-AID (id="ai-assessment")
+             ======================================================= */}
+          <section id="ai-assessment" className="scroll-mt-24">
+            <AiHealthAssessment
+              patientId={currentPatientId}
+              liveVitals={{
+                heartRate,
+                spo2,
+                temperature,
+                bloodPressure: '120/80',
+              }}
+              attendingDoctor={{
+                name: attendingDoctorName,
+                phone: attendingDoctorPhone,
+                email: attendingDoctorEmail,
+                specialty: attendingDoctorSpecialty,
+              }}
+            />
+          </section>
+
+          {/* =======================================================
+              7. MEDICATIONS & PRESCRIPTION MANAGEMENT (id="medications")
+             ======================================================= */}
+          <section id="medications" className="scroll-mt-24">
+            <MedicationManagement
+              patientId={currentPatientId}
+              role={role}
+              doctorInfo={{
+                name: attendingDoctorName,
+                phone: attendingDoctorPhone,
+                email: attendingDoctorEmail,
+              }}
+            />
+          </section>
+
+          {/* =======================================================
+              8. PATIENTS ROSTER & CARE TEAM (id="patients")
              ======================================================= */}
           <section id="patients" className="scroll-mt-24 space-y-3">
             <div>

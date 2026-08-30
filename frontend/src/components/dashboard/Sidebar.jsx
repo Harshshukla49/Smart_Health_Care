@@ -5,11 +5,13 @@ import toast from 'react-hot-toast';
 import {
   Activity,
   BellRing,
+  BrainCircuit,
   ChevronRight,
   FileText,
   HeartPulse,
   LayoutDashboard,
   LogOut,
+  Pill,
   PlusCircle,
   Settings,
   ShieldAlert,
@@ -33,6 +35,8 @@ function getNavigationSections(role) {
         items: [
           { id: 'overview', label: 'Health Overview', to: '/dashboard', icon: LayoutDashboard },
           { id: 'vitals', label: 'My Live Vitals', to: '/dashboard#vitals', icon: Activity },
+          { id: 'medications', label: 'My Medications', to: '/dashboard#medications', icon: Pill },
+          { id: 'ai-assessment', label: 'AI Health Assessment', to: '/dashboard#ai-assessment', icon: BrainCircuit },
           { id: 'patients', label: 'My Care Team', to: '/dashboard#patients', icon: UsersRound },
         ],
       },
@@ -61,12 +65,14 @@ function getNavigationSections(role) {
         { id: 'overview', label: 'Ward Overview', to: '/dashboard', icon: LayoutDashboard },
         { id: 'vitals', label: 'Live Monitoring', to: '/dashboard#vitals', icon: Activity },
         { id: 'patients', label: 'Patients Roster', to: '/dashboard#patients', icon: UsersRound },
+        { id: 'medications', label: 'Prescriptions & Meds', to: '/dashboard#medications', icon: Pill },
         { id: 'add-patient', label: 'Add Patient', to: '/add-patient', icon: PlusCircle },
       ],
     },
     {
       title: 'DIAGNOSTICS & TRIAGE',
       items: [
+        { id: 'ai-assessment', label: 'AI Assessment & First Aid', to: '/dashboard#ai-assessment', icon: BrainCircuit },
         { id: 'insights', label: 'Risk Predictions', to: '/dashboard#insights', icon: ShieldAlert },
         { id: 'ecg', label: 'ECG Analysis', to: '/dashboard#ecg', icon: Waves },
         { id: 'reports', label: 'Clinical Reports', to: '/dashboard#reports', icon: FileText },
