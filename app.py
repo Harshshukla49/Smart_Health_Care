@@ -217,6 +217,7 @@ vitals_model = None
 vitals_model_classes = []
 chat_user_connections = {}
 chat_sid_context = {}
+active_video_calls = {}
 
 if not VITAL_MODEL_PATH.exists():
     dataset_path = BASE_DIR / "datasetheartrate" / "vitals_dataset.csv"
@@ -317,7 +318,7 @@ def require_auth(roles=None, patient_id_arg=None):
 
     return decorator
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading", manage_session=False)
 
 dataset_vitals_rows = []
 sensor_adapter = None
@@ -1933,6 +1934,10 @@ def _chat_presence_reference():
     return db.reference('chat_presence')
 
 
+def _calls_reference():
+    return db.reference('calls')
+
+
 def _chat_now_iso():
     return datetime.now(timezone.utc).isoformat()
 
@@ -1949,7 +1954,7 @@ def _chat_safe_key(value):
 
 
 def _chat_presence_key(role, actor_id):
-    return f"{str(role).strip().lower()}:{str(actor_id).strip().lower()}"
+    return f"{_chat_safe_key(role)}__{_chat_safe_key(actor_id)}"
 
 
 def _chat_thread_id(doctor_id, patient_id):
@@ -1992,9 +1997,9 @@ def _chat_extract_actor_from_payload(payload):
 
     actor_id = ''
     if role == 'doctor':
-        actor_id = str((payload or {}).get('email') or '').strip().lower()
+        actor_id = str((payload or {}).get('doctorId') or (payload or {}).get('email') or (payload or {}).get('uid') or '').strip().lower()
     else:
-        actor_id = str((payload or {}).get('patientId') or '').strip()
+        actor_id = str((payload or {}).get('patientId') or (payload or {}).get('userId') or (payload or {}).get('uid') or '').strip()
 
     if not actor_id:
         return {}
@@ -2003,6 +2008,9 @@ def _chat_extract_actor_from_payload(payload):
         'role': role,
         'id': actor_id,
         'phone': str((payload or {}).get('phone') or '').strip(),
+        'doctorId': str((payload or {}).get('doctorId') or '').strip(),
+        'email': str((payload or {}).get('email') or '').strip().lower(),
+        'name': str((payload or {}).get('name') or '').strip(),
     }
 
 
@@ -2028,10 +2036,29 @@ def _chat_resolve_http_actor(fallback_payload=None):
 
 def _chat_resolve_socket_actor(auth_data=None):
     if isinstance(auth_data, dict):
-        token = str(auth_data.get('token') or '').strip()
-        actor = _chat_extract_actor_from_payload(_decode_auth_token(token))
-        if actor:
-            return actor
+        token = str(auth_data.get('token') or auth_data.get('authToken') or '').strip()
+        if token:
+            actor = _chat_extract_actor_from_payload(_decode_auth_token(token))
+            if actor:
+                if auth_data.get('doctorId') and not actor.get('doctorId'):
+                    actor['doctorId'] = str(auth_data.get('doctorId')).strip()
+                if auth_data.get('email') and not actor.get('email'):
+                    actor['email'] = str(auth_data.get('email')).strip().lower()
+                if auth_data.get('name') and not actor.get('name'):
+                    actor['name'] = str(auth_data.get('name')).strip()
+                return actor
+
+        role = str(auth_data.get('role') or '').strip().lower()
+        actor_id = str(auth_data.get('doctorId') or auth_data.get('patientId') or auth_data.get('userId') or auth_data.get('email') or '').strip()
+        if role in ('doctor', 'patient') and actor_id:
+            return {
+                'role': role,
+                'id': actor_id.lower() if role == 'doctor' else actor_id,
+                'doctorId': str(auth_data.get('doctorId') or '').strip(),
+                'email': str(auth_data.get('email') or '').strip().lower(),
+                'patientId': str(auth_data.get('patientId') or '').strip(),
+                'name': str(auth_data.get('name') or '').strip(),
+            }
 
     auth_header = str(request.headers.get('Authorization') or '').strip()
     if auth_header.lower().startswith('bearer '):
@@ -2223,21 +2250,27 @@ def _chat_mark_message_read(actor, thread_id, message_id):
 def _chat_emit_presence(role, actor_id, online, sid=''):
     now_iso = _chat_now_iso()
     key = _chat_presence_key(role, actor_id)
-    _chat_presence_reference().child(key).update({
-        'role': str(role or '').strip().lower(),
-        'userId': str(actor_id or '').strip(),
-        'online': bool(online),
-        'lastSeen': now_iso,
-        'socketId': str(sid or ''),
-    })
+    try:
+        _chat_presence_reference().child(key).update({
+            'role': str(role or '').strip().lower(),
+            'userId': str(actor_id or '').strip(),
+            'online': bool(online),
+            'lastSeen': now_iso,
+            'socketId': str(sid or ''),
+        })
+    except Exception as e:
+        print(f"[PRESENCE] Error updating RTDB: {e}")
 
-    socketio.emit('chat:presence_update', {
-        'role': str(role or '').strip().lower(),
-        'userId': str(actor_id or '').strip(),
-        'userKey': key,
-        'online': bool(online),
-        'lastSeen': now_iso,
-    })
+    try:
+        socketio.emit('chat:presence_update', {
+            'role': str(role or '').strip().lower(),
+            'userId': str(actor_id or '').strip(),
+            'userKey': key,
+            'online': bool(online),
+            'lastSeen': now_iso,
+        })
+    except Exception as e:
+        print(f"[PRESENCE] Error emitting presence update: {e}")
 
 
 def _chat_emit_to_user(role, actor_id, event_name, payload):
@@ -4438,13 +4471,10 @@ def patch_chat_message_read(message_id):
     return api_success('Message marked as read.', {'message': message})
 
 
-@socketio.on('connect')
-def on_socket_connect(auth):
-    actor = _chat_resolve_socket_actor(auth)
-    if not actor:
-        return False
+def _register_socket_user(sid, actor):
+    if not isinstance(actor, dict) or not actor.get('role') or not actor.get('id'):
+        return None
 
-    sid = str(request.sid)
     role = str(actor.get('role') or '').strip().lower()
     actor_id = str(actor.get('id') or '').strip().lower() if role == 'doctor' else str(actor.get('id') or '').strip()
     user_key = _chat_presence_key(role, actor_id)
@@ -4453,13 +4483,44 @@ def on_socket_connect(auth):
         'role': role,
         'id': actor_id,
         'userKey': user_key,
+        'doctorId': str(actor.get('doctorId') or '').strip(),
+        'email': str(actor.get('email') or '').strip().lower(),
+        'patientId': str(actor.get('patientId') or '').strip(),
+        'name': str(actor.get('name') or '').strip(),
     }
     chat_user_connections.setdefault(user_key, set()).add(sid)
+    join_room(f"{role}:{actor_id.lower()}")
+    join_room(f"user:{role}:{actor_id.lower()}")
+
+    if role == 'doctor':
+        join_room(f"doctor:{actor_id.lower()}")
+        doc_email = str(actor.get('email') or '').strip().lower()
+        if doc_email:
+            join_room(f"doctor:{doc_email}")
+            chat_user_connections.setdefault(f"doctor:{doc_email}", set()).add(sid)
+        doc_id = str(actor.get('doctorId') or '').strip().lower()
+        if doc_id:
+            join_room(f"doctor:{doc_id}")
+            chat_user_connections.setdefault(f"doctor:{doc_id}", set()).add(sid)
+    elif role == 'patient':
+        join_room(f"patient:{actor_id.lower()}")
+        chat_user_connections.setdefault(f"patient:{actor_id.lower()}", set()).add(sid)
+
     _chat_emit_presence(role, actor_id, True, sid=sid)
+    return user_key
+
+
+@socketio.on('connect')
+def on_socket_connect(auth):
+    actor = _chat_resolve_socket_actor(auth)
+    sid = str(request.sid)
+    if actor:
+        _register_socket_user(sid, actor)
+    return True
 
 
 @socketio.on('disconnect')
-def on_socket_disconnect():
+def on_socket_disconnect(*args, **kwargs):
     sid = str(request.sid)
     context = chat_sid_context.pop(sid, None)
     if not isinstance(context, dict):
@@ -4468,15 +4529,52 @@ def on_socket_disconnect():
     user_key = str(context.get('userKey') or '')
     role = str(context.get('role') or '').strip().lower()
     actor_id = str(context.get('id') or '').strip()
-    sessions = chat_user_connections.get(user_key) or set()
-    sessions.discard(sid)
 
-    if sessions:
-        chat_user_connections[user_key] = sessions
-        _chat_emit_presence(role, actor_id, True, sid=next(iter(sessions)))
+    # Clean up all keys containing this sid
+    keys_to_clean = [user_key, f"{role}:{actor_id.lower()}"]
+    if role == 'doctor':
+        doc_email = str(context.get('email') or '').strip().lower()
+        if doc_email:
+            keys_to_clean.append(f"doctor:{doc_email}")
+        doc_id = str(context.get('doctorId') or '').strip().lower()
+        if doc_id:
+            keys_to_clean.append(f"doctor:{doc_id}")
+    elif role == 'patient':
+        keys_to_clean.append(f"patient:{actor_id.lower()}")
+
+    has_remaining = False
+    for k in set(keys_to_clean):
+        sessions = chat_user_connections.get(k) or set()
+        sessions.discard(sid)
+        if sessions:
+            chat_user_connections[k] = sessions
+            has_remaining = True
+        else:
+            chat_user_connections.pop(k, None)
+
+    if has_remaining:
+        remaining_sid = next(iter(chat_user_connections.get(user_key) or set()), '')
+        _chat_emit_presence(role, actor_id, True, sid=remaining_sid)
     else:
-        chat_user_connections.pop(user_key, None)
         _chat_emit_presence(role, actor_id, False)
+
+
+@socketio.on('call:register')
+def on_call_register(data):
+    payload = data if isinstance(data, dict) else {}
+    actor = _chat_resolve_socket_actor(payload)
+    sid = str(request.sid)
+    if not actor:
+        emit('call:error', {'message': 'Invalid credentials for call registration.'})
+        return
+
+    _register_socket_user(sid, actor)
+    emit('call:registered', {
+        'status': 'registered',
+        'role': actor.get('role'),
+        'id': actor.get('id'),
+        'name': actor.get('name') or _chat_actor_display_name(actor.get('role'), actor.get('id')),
+    })
 
 
 @socketio.on('chat:join_thread')
@@ -4620,264 +4718,354 @@ def on_chat_presence_ping(data):
 @socketio.on('call:request')
 def on_call_request(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
+    sid = str(request.sid)
+    context = chat_sid_context.get(sid) or {}
+    actor_role = str(context.get('role') or payload.get('callerRole') or '').strip().lower()
+    actor_id = str(context.get('id') or payload.get('callerId') or '').strip()
+
+    if not actor_role or not actor_id:
+        resolved = _chat_resolve_socket_actor(payload)
+        if resolved:
+            actor_role = str(resolved.get('role') or '').strip().lower()
+            actor_id = str(resolved.get('id') or '').strip()
+            _register_socket_user(sid, resolved)
+
+    if not actor_role or not actor_id:
+        emit('call:error', {'message': 'Unauthorized socket session. Please log in again.'})
         return
+
+    call_id = str(payload.get('callId') or f"call_{int(time.time() * 1000)}_{secrets.token_hex(4)}").strip()
+    patient_id = str(payload.get('patientId') or (actor_id if actor_role == 'patient' else '')).strip()
+    doctor_id = str(payload.get('doctorId') or (actor_id if actor_role == 'doctor' else '')).strip().lower()
 
     thread_id = str(payload.get('threadId') or '').strip()
-    if not thread_id:
-        emit('call:error', {'message': 'threadId is required.'})
+    if thread_id and (not patient_id or not doctor_id):
+        meta = _chat_get_thread_meta(thread_id)
+        if meta:
+            doctor_id = doctor_id or str(meta.get('doctorId') or '').strip().lower()
+            patient_id = patient_id or str(meta.get('patientId') or '').strip()
+
+    if not patient_id or not doctor_id:
+        emit('call:error', {'message': 'patientId and doctorId are required for video call.'})
         return
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
+    # Verify Patient Record
+    patient_record = _chat_get_patient_record(patient_id)
+    if not isinstance(patient_record, dict):
+        emit('call:error', {'message': f'Patient record {patient_id} not found in system.'})
         return
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
+    # Verify Doctor Assignment
+    if not _doctor_owns_record(patient_record, doctor_id):
+        assigned = str(
+            patient_record.get('assignedDoctorId')
+            or patient_record.get('doctorId')
+            or patient_record.get('doctorEmail')
+            or ''
+        ).strip().lower()
+        if assigned != doctor_id.lower() and doctor_id.lower() not in assigned:
+            emit('call:error', {'message': 'Doctor is not assigned to this patient.'})
+            return
 
-    target = _chat_counterparty_for_actor(meta, actor)
-    target_id = str(target.get('id') or '').strip()
-    target_role = str(target.get('role') or '').strip().lower()
-    if not target_id or target_role not in ('doctor', 'patient'):
-        emit('call:error', {'message': 'Counterparty is unavailable.'})
-        return
+    patient_name = str(payload.get('patientName') or patient_record.get('name') or 'Patient').strip()
+    doctor_name = _chat_actor_display_name('doctor', doctor_id) or str(
+        patient_record.get('doctorName') or patient_record.get('assignedDoctorName') or 'Assigned Physician'
+    ).strip()
 
-    request_id = f"call-{int(time.time() * 1000)}-{secrets.token_hex(3)}"
     now_iso = _chat_now_iso()
-    base_payload = {
-        'requestId': request_id,
-        'threadId': thread_id,
-        'doctorId': str(meta.get('doctorId') or '').strip().lower(),
-        'patientId': str(meta.get('patientId') or '').strip(),
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'fromName': _chat_actor_display_name(actor.get('role'), actor.get('id')),
-        'createdAt': now_iso,
-    }
 
-    delivered = _chat_emit_to_user(target_role, target_id, 'call:incoming', base_payload)
-    if delivered <= 0:
-        emit('call:missed', {
-            **base_payload,
-            'message': 'Partner is offline or unavailable.',
+    # Check Doctor Online Presence
+    doc_keys = [
+        _chat_presence_key('doctor', doctor_id),
+        f"doctor:{doctor_id.lower()}",
+    ]
+    if '@' in doctor_id:
+        doc_keys.append(f"doctor:{doctor_id.split('@')[0].lower()}")
+
+    doc_sessions = set()
+    for dk in doc_keys:
+        doc_sessions.update(chat_user_connections.get(dk) or set())
+
+    if not doc_sessions:
+        for k, s in chat_user_connections.items():
+            if k.startswith('doctor:') and (doctor_id.lower() in k.lower()):
+                doc_sessions.update(s)
+
+    # Doctor is Offline / Unavailable
+    if not doc_sessions:
+        call_record = {
+            'callId': call_id,
+            'patientId': patient_id,
+            'patientName': patient_name,
+            'doctorId': doctor_id,
+            'doctorName': doctor_name,
+            'status': 'unavailable',
+            'callType': 'video',
+            'createdAt': now_iso,
+            'endedAt': now_iso,
+        }
+        try:
+            _calls_reference().child(call_id).set(call_record)
+        except Exception as e:
+            print(f"[CALL] Error writing call to RTDB: {e}")
+
+        emit('call:unavailable', {
+            'callId': call_id,
+            'doctorId': doctor_id,
+            'doctorName': doctor_name,
+            'message': f"{doctor_name} is currently offline or unavailable. Please try again later.",
         })
         return
 
-    emit('call:outgoing', {
-        **base_payload,
-        'toRole': target_role,
-        'toId': target_id,
-    })
+    # Check Busy Status
+    for existing_id, call_info in list(active_video_calls.items()):
+        if (
+            call_info.get('doctorId') == doctor_id
+            and call_info.get('status') in ('ringing', 'accepted', 'connected')
+            and existing_id != call_id
+        ):
+            emit('call:busy', {
+                'callId': call_id,
+                'doctorId': doctor_id,
+                'doctorName': doctor_name,
+                'message': f"{doctor_name} is currently on another clinical call. Please try again shortly.",
+            })
+            return
+
+    vitals_snapshot = payload.get('vitalsSnapshot') or {}
+    call_payload = {
+        'callId': call_id,
+        'patientId': patient_id,
+        'patientName': patient_name,
+        'doctorId': doctor_id,
+        'doctorName': doctor_name,
+        'callerRole': actor_role,
+        'callerId': actor_id,
+        'callerName': patient_name if actor_role == 'patient' else doctor_name,
+        'callType': str(payload.get('callType') or 'video'),
+        'status': 'ringing',
+        'createdAt': now_iso,
+        'threadId': thread_id or f"d_{_chat_safe_key(doctor_id)}__p_{_chat_safe_key(patient_id)}",
+        'vitalsSnapshot': vitals_snapshot,
+    }
+
+    active_video_calls[call_id] = call_payload
+
+    try:
+        _calls_reference().child(call_id).set(call_payload)
+    except Exception as e:
+        print(f"[CALL] Error writing call to RTDB: {e}")
+
+    # Emit incoming call to doctor room and doctor sockets
+    socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.lower()}")
+    for s in doc_sessions:
+        socketio.emit('call:incoming', call_payload, to=s)
+
+    # Emit ringing confirmation back to caller
+    emit('call:outgoing', call_payload)
+    emit('call:ringing', call_payload)
 
 
 @socketio.on('call:accept')
 def on_call_accept(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
-        return
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.get(call_id) or {}
+    patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
+    doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
 
-    thread_id = str(payload.get('threadId') or '').strip()
-    if not thread_id:
-        emit('call:error', {'message': 'threadId is required.'})
-        return
+    now_iso = _chat_now_iso()
+    if call_id in active_video_calls:
+        active_video_calls[call_id]['status'] = 'accepted'
+        active_video_calls[call_id]['acceptedAt'] = now_iso
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    try:
+        _calls_reference().child(call_id).update({
+            'status': 'accepted',
+            'acceptedAt': now_iso,
+        })
+    except Exception as e:
+        print(f"[CALL] RTDB update error: {e}")
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
+    accept_payload = {
+        'callId': call_id,
+        'patientId': patient_id,
+        'doctorId': doctor_id,
+        'doctorName': call_info.get('doctorName') or 'Doctor',
+        'acceptedAt': now_iso,
+        'threadId': call_info.get('threadId') or f"d_{_chat_safe_key(doctor_id)}__p_{_chat_safe_key(patient_id)}",
+    }
 
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'call:accepted', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'fromName': _chat_actor_display_name(actor.get('role'), actor.get('id')),
-        'acceptedAt': _chat_now_iso(),
-    })
+    socketio.emit('call:accepted', accept_payload, to=f"patient:{patient_id.lower()}")
+    _chat_emit_to_user('patient', patient_id, 'call:accepted', accept_payload)
 
 
 @socketio.on('call:reject')
 def on_call_reject(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
-        return
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.pop(call_id, {})
+    patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
+    doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
 
-    thread_id = str(payload.get('threadId') or '').strip()
-    if not thread_id:
-        emit('call:error', {'message': 'threadId is required.'})
-        return
+    now_iso = _chat_now_iso()
+    try:
+        _calls_reference().child(call_id).update({
+            'status': 'declined',
+            'endedAt': now_iso,
+        })
+    except Exception as e:
+        print(f"[CALL] RTDB update error: {e}")
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    reject_payload = {
+        'callId': call_id,
+        'patientId': patient_id,
+        'doctorId': doctor_id,
+        'rejectedAt': now_iso,
+        'reason': payload.get('reason') or 'Doctor declined the call',
+        'threadId': call_info.get('threadId') or '',
+    }
+    socketio.emit('call:rejected', reject_payload, to=f"patient:{patient_id.lower()}")
+    _chat_emit_to_user('patient', patient_id, 'call:rejected', reject_payload)
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
 
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'call:rejected', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'fromName': _chat_actor_display_name(actor.get('role'), actor.get('id')),
-        'rejectedAt': _chat_now_iso(),
-    })
+@socketio.on('call:decline')
+def on_call_decline(data):
+    on_call_reject(data)
 
 
 @socketio.on('call:end')
 def on_call_end(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
-        return
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.pop(call_id, {})
+    patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
+    doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
 
-    thread_id = str(payload.get('threadId') or '').strip()
-    if not thread_id:
-        emit('call:error', {'message': 'threadId is required.'})
-        return
+    now_iso = _chat_now_iso()
+    try:
+        _calls_reference().child(call_id).update({
+            'status': 'ended',
+            'endedAt': now_iso,
+        })
+    except Exception as e:
+        print(f"[CALL] RTDB update error: {e}")
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    end_payload = {
+        'callId': call_id,
+        'endedAt': now_iso,
+        'threadId': call_info.get('threadId') or '',
+    }
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
+    if patient_id:
+        socketio.emit('call:ended', end_payload, to=f"patient:{patient_id.lower()}")
+        _chat_emit_to_user('patient', patient_id, 'call:ended', end_payload)
 
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'call:ended', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'fromName': _chat_actor_display_name(actor.get('role'), actor.get('id')),
-        'endedAt': _chat_now_iso(),
-    })
+    if doctor_id:
+        socketio.emit('call:ended', end_payload, to=f"doctor:{doctor_id.lower()}")
+        _chat_emit_to_user('doctor', doctor_id, 'call:ended', end_payload)
 
 
 @socketio.on('webrtc:offer')
 def on_webrtc_offer(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.get(call_id) or {}
+    sdp = payload.get('sdp')
+    if not sdp:
+        emit('call:error', {'message': 'sdp offer is required.'})
         return
 
-    thread_id = str(payload.get('threadId') or '').strip()
-    offer = payload.get('sdp')
-    if not thread_id or not isinstance(offer, dict):
-        emit('call:error', {'message': 'threadId and sdp are required.'})
-        return
+    target_role = str(payload.get('targetRole') or '').strip().lower()
+    target_id = str(payload.get('targetId') or '').strip()
+    if not target_role or not target_id:
+        context = chat_sid_context.get(str(request.sid)) or {}
+        caller_role = context.get('role') or payload.get('fromRole')
+        if caller_role == 'patient':
+            target_role = 'doctor'
+            target_id = call_info.get('doctorId') or payload.get('doctorId')
+        else:
+            target_role = 'patient'
+            target_id = call_info.get('patientId') or payload.get('patientId')
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    offer_payload = {
+        'callId': call_id,
+        'sdp': sdp,
+        'fromRole': payload.get('fromRole'),
+        'fromId': payload.get('fromId'),
+        'threadId': payload.get('threadId') or call_info.get('threadId') or '',
+    }
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
-
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'webrtc:offer', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'sdp': offer,
-    })
+    if target_role and target_id:
+        socketio.emit('webrtc:offer', offer_payload, to=f"{target_role}:{target_id.lower()}")
+        _chat_emit_to_user(target_role, target_id, 'webrtc:offer', offer_payload)
 
 
 @socketio.on('webrtc:answer')
 def on_webrtc_answer(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.get(call_id) or {}
+    sdp = payload.get('sdp')
+    if not sdp:
+        emit('call:error', {'message': 'sdp answer is required.'})
         return
 
-    thread_id = str(payload.get('threadId') or '').strip()
-    answer = payload.get('sdp')
-    if not thread_id or not isinstance(answer, dict):
-        emit('call:error', {'message': 'threadId and sdp are required.'})
-        return
+    target_role = str(payload.get('targetRole') or '').strip().lower()
+    target_id = str(payload.get('targetId') or '').strip()
+    if not target_role or not target_id:
+        context = chat_sid_context.get(str(request.sid)) or {}
+        caller_role = context.get('role') or payload.get('fromRole')
+        if caller_role == 'doctor':
+            target_role = 'patient'
+            target_id = call_info.get('patientId') or payload.get('patientId')
+        else:
+            target_role = 'doctor'
+            target_id = call_info.get('doctorId') or payload.get('doctorId')
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    answer_payload = {
+        'callId': call_id,
+        'sdp': sdp,
+        'fromRole': payload.get('fromRole'),
+        'fromId': payload.get('fromId'),
+        'threadId': payload.get('threadId') or call_info.get('threadId') or '',
+    }
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
-
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'webrtc:answer', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
-        'sdp': answer,
-    })
+    if target_role and target_id:
+        socketio.emit('webrtc:answer', answer_payload, to=f"{target_role}:{target_id.lower()}")
+        _chat_emit_to_user(target_role, target_id, 'webrtc:answer', answer_payload)
 
 
 @socketio.on('webrtc:ice_candidate')
 def on_webrtc_ice_candidate(data):
     payload = data if isinstance(data, dict) else {}
-    context = chat_sid_context.get(str(request.sid)) or {}
-    actor = {'role': context.get('role'), 'id': context.get('id')}
-    if not actor.get('role') or not actor.get('id'):
-        emit('call:error', {'message': 'Unauthorized socket session.'})
-        return
-
-    thread_id = str(payload.get('threadId') or '').strip()
+    call_id = str(payload.get('callId') or '').strip()
+    call_info = active_video_calls.get(call_id) or {}
     candidate = payload.get('candidate')
-    if not thread_id or not isinstance(candidate, dict):
-        emit('call:error', {'message': 'threadId and candidate are required.'})
+    if not candidate:
         return
 
-    meta = _chat_get_thread_meta(thread_id)
-    if not meta:
-        emit('call:error', {'message': 'Chat thread not found.'})
-        return
+    target_role = str(payload.get('targetRole') or '').strip().lower()
+    target_id = str(payload.get('targetId') or '').strip()
+    if not target_role or not target_id:
+        context = chat_sid_context.get(str(request.sid)) or {}
+        caller_role = context.get('role') or payload.get('fromRole')
+        if caller_role == 'patient':
+            target_role = 'doctor'
+            target_id = call_info.get('doctorId') or payload.get('doctorId')
+        else:
+            target_role = 'patient'
+            target_id = call_info.get('patientId') or payload.get('patientId')
 
-    allowed, reason = _chat_authorize(actor, meta.get('doctorId'), meta.get('patientId'))
-    if not allowed:
-        emit('call:error', {'message': reason})
-        return
-
-    target = _chat_counterparty_for_actor(meta, actor)
-    _chat_emit_to_user(target.get('role'), target.get('id'), 'webrtc:ice_candidate', {
-        'threadId': thread_id,
-        'fromRole': str(actor.get('role') or '').strip().lower(),
-        'fromId': str(actor.get('id') or '').strip(),
+    candidate_payload = {
+        'callId': call_id,
         'candidate': candidate,
-    })
+        'threadId': payload.get('threadId') or call_info.get('threadId') or '',
+    }
+
+    if target_role and target_id:
+        socketio.emit('webrtc:ice_candidate', candidate_payload, to=f"{target_role}:{target_id.lower()}")
+        _chat_emit_to_user(target_role, target_id, 'webrtc:ice_candidate', candidate_payload)
 
 
 @socketio.on('subscribe_patient')

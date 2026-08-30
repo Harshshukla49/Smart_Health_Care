@@ -29,15 +29,23 @@ export function ActiveVideoCallModal() {
     toggleMute,
     toggleCamera,
     localStream,
+    remoteStream,
   } = useVideoCall();
 
   const localVideoRef = useRef(null);
+  const remoteVideoRef = useRef(null);
 
   useEffect(() => {
     if (localVideoRef.current && localStream) {
       localVideoRef.current.srcObject = localStream;
     }
   }, [localStream, callState]);
+
+  useEffect(() => {
+    if (remoteVideoRef.current && remoteStream) {
+      remoteVideoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream, callState]);
 
   if (callState !== 'calling' && callState !== 'connected' && callState !== 'ended') {
     return null;
@@ -157,12 +165,36 @@ export function ActiveVideoCallModal() {
         {/* Video Canvas Stage */}
         <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden">
           {/* Main Remote Video feed */}
-          <div className="relative w-full h-full flex items-center justify-center overflow-hidden">
-            <img
-              src="/assets/doctor-command-center.png"
-              alt="Remote Consultation Stream"
-              className="w-full h-full object-cover opacity-90 filter brightness-95"
-            />
+          <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-slate-950">
+            {remoteStream ? (
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                playsInline
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center text-center p-6 text-slate-300">
+                <div className="relative mb-4">
+                  <div className="w-24 h-24 rounded-full border-4 border-sky-400/50 bg-slate-800 flex items-center justify-center shadow-xl">
+                    <User className="h-12 w-12 text-sky-300" />
+                  </div>
+                  <span className="absolute bottom-0 right-0 h-6 w-6 rounded-full bg-emerald-500 border-2 border-slate-900 grid place-items-center">
+                    <Activity className="h-3 w-3 text-white animate-pulse" />
+                  </span>
+                </div>
+                <h4 className="text-xl font-bold text-white">
+                  {activeCall?.recipientName || activeCall?.doctorName || activeCall?.patientName || 'Consultation Partner'}
+                </h4>
+                <p className="text-xs text-sky-300 mt-1 font-mono">
+                  Connecting secure peer-to-peer WebRTC media channel...
+                </p>
+                <div className="mt-3 flex items-center gap-2 text-[11px] text-slate-400">
+                  <span className="h-2 w-2 rounded-full bg-amber-400 animate-ping" />
+                  <span>Negotiating STUN/TURN ICE candidates</span>
+                </div>
+              </div>
+            )}
 
             {/* Ambient Speech / Stream Indicator */}
             <div className="absolute top-4 left-4 rounded-xl bg-slate-900/75 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 text-xs text-white flex items-center gap-2 shadow-lg">

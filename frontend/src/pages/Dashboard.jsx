@@ -423,7 +423,11 @@ function DashboardBody({ liveVitals }) {
 
   const attendingDoctorEmail = isDoctor
     ? (session?.email || '')
-    : (doctorEmail || session?.doctorEmail || 'physician@hospital.org');
+    : (doctorEmail || session?.doctorEmail || '');
+
+  const attendingDoctorId = isDoctor
+    ? (session?.doctorId || session?.email || '')
+    : (session?.doctorId || doctorEmail || session?.doctorEmail || '');
 
   const attendingDoctorPhone = isDoctor
     ? (session?.phone || '')
@@ -435,7 +439,8 @@ function DashboardBody({ liveVitals }) {
 
   const handleOpenVideoDialer = () => {
     openDialer({
-      id: attendingDoctorEmail || 'assigned-doctor',
+      id: attendingDoctorId || attendingDoctorEmail || 'assigned-doctor',
+      email: attendingDoctorEmail,
       name: attendingDoctorName,
       title: attendingDoctorSpecialty,
       department: 'Cardiology & Intensive Ward 4B',

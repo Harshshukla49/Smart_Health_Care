@@ -1,10 +1,29 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
+import { io } from 'socket.io-client';
 import { getAuthSession, normalizeRole } from '../utils/auth';
 
 const VideoCallContext = createContext(null);
 
-// Standard Available Hospital Physicians
+const SOCKET_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://smart-health-backend-2idf.onrender.com';
+
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    ...(import.meta.env.VITE_TURN_SERVER
+      ? [
+          {
+            urls: import.meta.env.VITE_TURN_SERVER,
+            username: import.meta.env.VITE_TURN_USERNAME || '',
+            credential: import.meta.env.VITE_TURN_PASSWORD || '',
+          },
+        ]
+      : []),
+  ],
+};
+
+// Standard Available Hospital Physicians (Fallback roster)
 export const HOSPITAL_PHYSICIANS = [
   {
     id: 'DOC-4B-01',
@@ -72,28 +91,38 @@ export function VideoCallProvider({ children }) {
   const session = getAuthSession();
   const userRole = normalizeRole(session?.role);
   const isDoctor = userRole === 'doctor';
-  const currentUserId = isDoctor ? (session?.email || session?.doctorId || '') : (session?.patientId || '');
+  const currentUserId = isDoctor
+    ? (session?.doctorId || session?.email || '')
+    : (session?.patientId || '');
   const currentUserName = session?.name || (isDoctor ? 'Doctor' : 'Patient');
 
   // Modal & Call States
   const [isDialerOpen, setIsDialerOpen] = useState(false);
   const [dialerDefaultDoctor, setDialerDefaultDoctor] = useState(HOSPITAL_PHYSICIANS[0]);
-  
-  // Call Lifecycle: 'idle' | 'calling' | 'incoming' | 'connected' | 'ended' | 'rejected'
+
+  // Call Lifecycle: 'idle' | 'calling' | 'incoming' | 'connecting' | 'connected' | 'rejected' | 'busy' | 'unavailable' | 'ended' | 'failed'
   const [callState, setCallState] = useState('idle');
   const [activeCall, setActiveCall] = useState(null);
   const [callDuration, setCallDuration] = useState(0);
 
-  // Audio / Video stream controls
+  // Audio / Video stream state
+  const [localStream, setLocalStream] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+
+  // Refs
+  const socketRef = useRef(null);
+  const peerConnectionRef = useRef(null);
   const localStreamRef = useRef(null);
+  const remoteStreamRef = useRef(null);
+  const iceCandidateQueueRef = useRef([]);
   const audioContextRef = useRef(null);
   const ringtoneTimerRef = useRef(null);
   const callTimerRef = useRef(null);
-  const broadcastChannelRef = useRef(null);
+  const callTimeoutRef = useRef(null);
 
-  // Synthesize Realistic Clinical Phone Ringtone via Web Audio API (cross-browser, zero external files)
+  // Synthesize Realistic Clinical Phone Ringtone via Web Audio API
   const startRingtone = useCallback(() => {
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -113,7 +142,6 @@ export function VideoCallProvider({ children }) {
           const osc2 = ctx.createOscillator();
           const gain = ctx.createGain();
 
-          // Standard US/International PBX ringtone frequencies (440Hz + 480Hz)
           osc1.frequency.value = 440;
           osc2.frequency.value = 480;
 
@@ -156,8 +184,8 @@ export function VideoCallProvider({ children }) {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
-      osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.18); // A5
+      osc.frequency.setValueAtTime(587.33, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.18);
       gain.gain.setValueAtTime(0.06, ctx.currentTime);
       gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
       osc.connect(gain);
@@ -178,10 +206,12 @@ export function VideoCallProvider({ children }) {
           audio: true,
         });
         localStreamRef.current = stream;
+        setLocalStream(stream);
         return stream;
       }
     } catch (err) {
-      console.warn('Camera/Mic permission denied or not available, using simulated stream:', err);
+      console.warn('Camera/Mic permission denied or not available:', err);
+      toast.error('Camera/microphone access denied. Please enable device permissions in your browser.');
     }
     return null;
   }, []);
@@ -190,116 +220,316 @@ export function VideoCallProvider({ children }) {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
+      setLocalStream(null);
+    }
+    if (remoteStreamRef.current) {
+      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      remoteStreamRef.current = null;
+      setRemoteStream(null);
     }
   }, []);
 
-  // Broadcast signaling across browser tabs/windows
-  const broadcastCallEvent = useCallback((event) => {
-    if (broadcastChannelRef.current) {
-      broadcastChannelRef.current.postMessage(event);
-    }
-    try {
-      localStorage.setItem('smart_health_call_event', JSON.stringify({ ...event, _ts: Date.now() }));
-    } catch {
-      // ignore
-    }
-  }, []);
-
-  // Handle incoming broadcast events
-  const handleSignalingMessage = useCallback((event) => {
-    if (!event || !event.type) return;
-
-    const { type, payload } = event;
-
-    switch (type) {
-      case 'CALL_INITIATED': {
-        // If current session is doctor or target recipient, trigger incoming call!
-        const isTargetDoctor = isDoctor || payload.recipientId === currentUserId || payload.recipientRole === 'doctor';
-        if (isTargetDoctor && callState === 'idle') {
-          setActiveCall(payload);
-          setCallState('incoming');
-          startRingtone();
-        }
-        break;
+  // WebRTC Peer Connection Factory
+  const createPeerConnection = useCallback((callId, targetRole, targetId) => {
+    if (peerConnectionRef.current) {
+      try {
+        peerConnectionRef.current.close();
+      } catch {
+        // ignore
       }
-
-      case 'CALL_ACCEPTED': {
-        // When doctor accepts, the patient's outgoing call transitions to connected
-        if (activeCall && (activeCall.callId === payload.callId)) {
-          stopRingtone();
-          playConnectChime();
-          setCallState('connected');
-          toast.success(`${payload.doctorName || 'Doctor'} accepted the video call!`);
-        }
-        break;
-      }
-
-      case 'CALL_DECLINED': {
-        if (activeCall && (activeCall.callId === payload.callId)) {
-          stopRingtone();
-          setCallState('rejected');
-          toast.error(`${payload.declinedByName || 'Doctor'} is currently unavailable.`);
-          setTimeout(() => {
-            setCallState('idle');
-            setActiveCall(null);
-          }, 3500);
-        }
-        break;
-      }
-
-      case 'CALL_ENDED': {
-        if (activeCall && (activeCall.callId === payload.callId)) {
-          stopRingtone();
-          stopMediaStream();
-          setCallState('ended');
-          toast('Video consultation completed.', { icon: 'ℹ️' });
-          setTimeout(() => {
-            setCallState('idle');
-            setActiveCall(null);
-            setCallDuration(0);
-          }, 2000);
-        }
-        break;
-      }
-
-      default:
-        break;
-    }
-  }, [activeCall, callState, currentUserId, isDoctor, playConnectChime, startRingtone, stopMediaStream, stopRingtone]);
-
-  // Listen to BroadcastChannel and localStorage events
-  useEffect(() => {
-    let channel;
-    try {
-      channel = new BroadcastChannel('smart_health_video_call_channel');
-      broadcastChannelRef.current = channel;
-      channel.onmessage = (msg) => {
-        handleSignalingMessage(msg.data);
-      };
-    } catch {
-      // BroadcastChannel fallback to storage listener below
     }
 
-    const onStorage = (e) => {
-      if (e.key === 'smart_health_call_event' && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          handleSignalingMessage(parsed);
-        } catch {
-          // ignore
-        }
+    const pc = new RTCPeerConnection(RTC_CONFIG);
+    iceCandidateQueueRef.current = [];
+
+    // Relay local ICE candidates to counterparty via socket signaling
+    pc.onicecandidate = (event) => {
+      if (event.candidate && socketRef.current) {
+        socketRef.current.emit('webrtc:ice_candidate', {
+          callId,
+          targetRole,
+          targetId,
+          candidate: event.candidate.toJSON(),
+        });
       }
     };
 
-    window.addEventListener('storage', onStorage);
+    // Receive incoming remote tracks
+    pc.ontrack = (event) => {
+      if (event.streams && event.streams[0]) {
+        remoteStreamRef.current = event.streams[0];
+        setRemoteStream(event.streams[0]);
+      }
+    };
+
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'connected') {
+        setCallState('connected');
+      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+        console.warn('[WEBRTC] Connection state changed:', pc.connectionState);
+      }
+    };
+
+    // Add local tracks to peer connection
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => {
+        pc.addTrack(track, localStreamRef.current);
+      });
+    }
+
+    peerConnectionRef.current = pc;
+    return pc;
+  }, []);
+
+  const closePeerConnection = useCallback(() => {
+    if (peerConnectionRef.current) {
+      try {
+        peerConnectionRef.current.close();
+      } catch {
+        // ignore
+      }
+      peerConnectionRef.current = null;
+    }
+    iceCandidateQueueRef.current = [];
+  }, []);
+
+  // Persistent Authenticated Socket Connection
+  useEffect(() => {
+    if (!session) return undefined;
+
+    const socket = io(SOCKET_BASE_URL, {
+      transports: ['websocket', 'polling'],
+      auth: {
+        token: session?.token,
+        role: userRole,
+        doctorId: session?.doctorId || session?.email,
+        patientId: session?.patientId,
+        email: session?.email,
+        name: session?.name,
+      },
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('call:register', {
+        role: userRole,
+        doctorId: session?.doctorId || session?.email,
+        patientId: session?.patientId,
+        email: session?.email,
+        name: session?.name,
+      });
+    });
+
+    // 1. Incoming Call Event (Received by assigned Doctor)
+    socket.on('call:incoming', (payload) => {
+      if (!isDoctor) return;
+      setActiveCall(payload);
+      setCallState('incoming');
+      startRingtone();
+    });
+
+    // 2. Call Accepted Event (Received by Patient)
+    socket.on('call:accepted', async (payload) => {
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtone();
+      playConnectChime();
+      setCallState('connecting');
+
+      const targetDoctorId = payload.doctorId;
+      const pc = createPeerConnection(payload.callId, 'doctor', targetDoctorId);
+
+      try {
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
+        await pc.setLocalDescription(offer);
+
+        socket.emit('webrtc:offer', {
+          callId: payload.callId,
+          targetRole: 'doctor',
+          targetId: targetDoctorId,
+          fromRole: 'patient',
+          fromId: session?.patientId,
+          sdp: offer,
+        });
+      } catch (err) {
+        console.error('[WEBRTC] Failed to create offer:', err);
+        toast.error('Could not initialize video connection. Please try again.');
+      }
+    });
+
+    // 3. WebRTC Offer (Received by Doctor)
+    socket.on('webrtc:offer', async (payload) => {
+      const targetPatientId = payload.fromId || activeCall?.patientId;
+      const pc = createPeerConnection(payload.callId, 'patient', targetPatientId);
+
+      try {
+        await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+
+        // Flush any queued ICE candidates
+        while (iceCandidateQueueRef.current.length > 0) {
+          const cand = iceCandidateQueueRef.current.shift();
+          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+        }
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit('webrtc:answer', {
+          callId: payload.callId,
+          targetRole: 'patient',
+          targetId: targetPatientId,
+          fromRole: 'doctor',
+          fromId: session?.doctorId || session?.email,
+          sdp: answer,
+        });
+
+        playConnectChime();
+        setCallState('connected');
+      } catch (err) {
+        console.error('[WEBRTC] Failed to process offer:', err);
+      }
+    });
+
+    // 4. WebRTC Answer (Received by Patient)
+    socket.on('webrtc:answer', async (payload) => {
+      const pc = peerConnectionRef.current;
+      if (pc) {
+        try {
+          await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+
+          // Flush any queued ICE candidates
+          while (iceCandidateQueueRef.current.length > 0) {
+            const cand = iceCandidateQueueRef.current.shift();
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          }
+
+          setCallState('connected');
+        } catch (err) {
+          console.error('[WEBRTC] Failed to set remote description:', err);
+        }
+      }
+    });
+
+    // 5. WebRTC ICE Candidate (Received by both)
+    socket.on('webrtc:ice_candidate', async (payload) => {
+      const pc = peerConnectionRef.current;
+      if (pc && pc.remoteDescription) {
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+        } catch (err) {
+          console.warn('[WEBRTC] Error adding candidate:', err);
+        }
+      } else {
+        iceCandidateQueueRef.current.push(payload.candidate);
+      }
+    });
+
+    // 6. Call Rejected Event
+    socket.on('call:rejected', () => {
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('rejected');
+      toast.error('Doctor is currently unavailable or declined the call.');
+      setTimeout(() => {
+        setCallState('idle');
+        setActiveCall(null);
+      }, 3000);
+    });
+
+    // 7. Doctor Offline / Unavailable Event
+    socket.on('call:unavailable', (payload) => {
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('unavailable');
+      toast.error(payload?.message || 'Doctor is currently offline or unavailable. Please try again later.');
+      setTimeout(() => {
+        setCallState('idle');
+        setActiveCall(null);
+      }, 3500);
+    });
+
+    // 8. Doctor Busy Event
+    socket.on('call:busy', (payload) => {
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('busy');
+      toast.error(payload?.message || 'Doctor is currently on another call. Please try again shortly.');
+      setTimeout(() => {
+        setCallState('idle');
+        setActiveCall(null);
+      }, 3500);
+    });
+
+    // 9. Call Ended Event
+    socket.on('call:ended', () => {
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('ended');
+      toast('Video consultation concluded.', { icon: 'ℹ️' });
+      setTimeout(() => {
+        setCallState('idle');
+        setActiveCall(null);
+        setCallDuration(0);
+      }, 1800);
+    });
+
+    // 10. Call Error Event
+    socket.on('call:error', (payload) => {
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('idle');
+      setActiveCall(null);
+      toast.error(payload?.message || 'Call signaling error occurred.');
+    });
 
     return () => {
-      if (channel) channel.close();
-      window.removeEventListener('storage', onStorage);
+      socket.disconnect();
+      socketRef.current = null;
     };
-  }, [handleSignalingMessage]);
+  }, [
+    createPeerConnection,
+    closePeerConnection,
+    isDoctor,
+    playConnectChime,
+    session,
+    startRingtone,
+    stopMediaStream,
+    stopRingtone,
+    userRole,
+  ]);
 
-  // Call duration timer
+  // Call duration counter
   useEffect(() => {
     if (callState === 'connected') {
       callTimerRef.current = window.setInterval(() => {
@@ -325,10 +555,10 @@ export function VideoCallProvider({ children }) {
       setDialerDefaultDoctor(defaultDoctor);
     } else {
       const currentSession = getAuthSession();
-      if (currentSession?.doctorName || currentSession?.doctorEmail) {
+      if (currentSession?.doctorName || currentSession?.doctorEmail || currentSession?.doctorId) {
         const rawName = currentSession?.doctorName || (currentSession?.doctorEmail ? currentSession.doctorEmail.split('@')[0] : 'Assigned Physician');
         setDialerDefaultDoctor({
-          id: currentSession?.doctorEmail || 'DOC-ASSIGNED',
+          id: currentSession?.doctorId || currentSession?.doctorEmail || 'DOC-ASSIGNED',
           name: rawName.toLowerCase().startsWith('dr.') ? rawName : `Dr. ${rawName}`,
           role: 'doctor',
           title: currentSession?.doctorSpecialty || 'Attending Physician',
@@ -353,25 +583,45 @@ export function VideoCallProvider({ children }) {
   // API: Patient starts call to doctor
   const startCall = useCallback(async (targetDoctor) => {
     setIsDialerOpen(false);
-    await acquireMediaStream();
+    const media = await acquireMediaStream();
+    if (!media) {
+      toast.error('Cannot place video call without camera/microphone permission.');
+      return;
+    }
+
+    const currentSession = getAuthSession();
+    const resolvedDoctorId = String(
+      targetDoctor?.id ||
+      targetDoctor?.email ||
+      currentSession?.doctorId ||
+      currentSession?.doctorEmail ||
+      ''
+    ).trim().lower();
+
+    const resolvedDoctorName = targetDoctor?.name ||
+      currentSession?.doctorName ||
+      'Assigned Physician';
+
+    const generatedCallId = `call_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
 
     const callPayload = {
-      callId: `CALL-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      callId: generatedCallId,
+      patientId: currentSession?.patientId || '',
+      patientName: currentSession?.name || 'Patient',
+      doctorId: resolvedDoctorId,
+      doctorName: resolvedDoctorName,
+      callerRole: userRole,
       callerId: currentUserId,
       callerName: currentUserName,
-      callerRole: userRole,
-      callerPhone: '+91 86018 45515',
-      patientId: isDoctor ? (targetDoctor.patientId || targetDoctor.id || '') : currentUserId,
-      patientName: isDoctor ? (targetDoctor.patientName || targetDoctor.name || 'Patient') : currentUserName,
-      recipientId: targetDoctor.id || targetDoctor.email || 'DOC-ASSIGNED',
-      recipientName: targetDoctor.name || (isDoctor ? (targetDoctor.patientName || 'Patient') : 'Assigned Physician'),
-      recipientTitle: targetDoctor.title || 'Attending Physician',
-      recipientDepartment: targetDoctor.department || 'Ward 4B',
-      recipientPhone: targetDoctor.phone || '+91 98765 43210',
-      recipientExtension: targetDoctor.extension || '401',
-      doctorName: targetDoctor.doctorName || targetDoctor.name || (isDoctor ? currentUserName : 'Assigned Physician'),
-      dialedNumber: targetDoctor.dialedNumber || targetDoctor.phone || targetDoctor.extension,
-      isAssignedDoctor: Boolean(targetDoctor.isAssigned),
+      recipientId: resolvedDoctorId,
+      recipientName: resolvedDoctorName,
+      recipientTitle: targetDoctor?.title || 'Attending Physician',
+      recipientDepartment: targetDoctor?.department || 'Ward 4B',
+      recipientPhone: targetDoctor?.phone || '+91 98765 43210',
+      recipientExtension: targetDoctor?.extension || '401',
+      isAssignedDoctor: Boolean(targetDoctor?.isAssigned ?? true),
+      callType: 'video',
+      status: 'calling',
       vitalsSnapshot: {
         heartRate: 72,
         spo2: 98,
@@ -385,56 +635,91 @@ export function VideoCallProvider({ children }) {
     setCallState('calling');
     startRingtone();
 
-    // Broadcast call to doctor
-    broadcastCallEvent({
-      type: 'CALL_INITIATED',
-      payload: callPayload,
-    });
-  }, [acquireMediaStream, broadcastCallEvent, currentUserId, currentUserName, isDoctor, startRingtone, userRole]);
+    // 45-second auto-timeout if doctor does not answer
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+    }
+    callTimeoutRef.current = setTimeout(() => {
+      stopRingtone();
+      stopMediaStream();
+      closePeerConnection();
+      setCallState('idle');
+      setActiveCall(null);
+      toast.error('Doctor did not answer. Please try again or request a callback.');
+      if (socketRef.current) {
+        socketRef.current.emit('call:end', {
+          callId: generatedCallId,
+          patientId: currentSession?.patientId,
+          doctorId: resolvedDoctorId,
+        });
+      }
+    }, 45000);
+
+    if (socketRef.current) {
+      socketRef.current.emit('call:request', callPayload);
+    } else {
+      toast.error('Connecting to signaling server... please try again in a moment.');
+    }
+  }, [
+    acquireMediaStream,
+    closePeerConnection,
+    currentUserId,
+    currentUserName,
+    startRingtone,
+    stopMediaStream,
+    stopRingtone,
+    userRole,
+  ]);
 
   // API: Doctor accepts call
   const acceptCall = useCallback(async () => {
     if (!activeCall) return;
     stopRingtone();
-    await acquireMediaStream();
+    const media = await acquireMediaStream();
+    if (!media) {
+      toast.error('Cannot answer call without camera/microphone permission.');
+      return;
+    }
 
-    const updatedCall = {
-      ...activeCall,
-      doctorName: currentUserName,
-      connectedAt: Date.now(),
-    };
+    setCallState('connecting');
 
-    setActiveCall(updatedCall);
-    setCallState('connected');
-    playConnectChime();
-
-    broadcastCallEvent({
-      type: 'CALL_ACCEPTED',
-      payload: updatedCall,
-    });
-  }, [acquireMediaStream, activeCall, broadcastCallEvent, currentUserName, playConnectChime, stopRingtone]);
+    if (socketRef.current) {
+      socketRef.current.emit('call:accept', {
+        callId: activeCall.callId,
+        patientId: activeCall.patientId,
+        doctorId: activeCall.doctorId || currentUserId,
+      });
+    }
+  }, [acquireMediaStream, activeCall, currentUserId, stopRingtone]);
 
   // API: Doctor declines call
   const declineCall = useCallback(() => {
     if (!activeCall) return;
     stopRingtone();
     stopMediaStream();
+    closePeerConnection();
 
-    broadcastCallEvent({
-      type: 'CALL_DECLINED',
-      payload: {
+    if (socketRef.current) {
+      socketRef.current.emit('call:reject', {
         callId: activeCall.callId,
-        declinedByName: currentUserName,
-      },
-    });
+        patientId: activeCall.patientId,
+        doctorId: activeCall.doctorId || currentUserId,
+        reason: 'Physician declined call',
+      });
+    }
 
     setCallState('idle');
     setActiveCall(null);
     toast('Call declined.', { icon: '📵' });
-  }, [activeCall, broadcastCallEvent, currentUserName, stopMediaStream, stopRingtone]);
+  }, [activeCall, closePeerConnection, currentUserId, stopMediaStream, stopRingtone]);
 
   // API: End Active Call
   const endCall = useCallback(() => {
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+
     if (!activeCall) {
       setCallState('idle');
       return;
@@ -442,23 +727,24 @@ export function VideoCallProvider({ children }) {
 
     stopRingtone();
     stopMediaStream();
+    closePeerConnection();
 
-    broadcastCallEvent({
-      type: 'CALL_ENDED',
-      payload: {
+    if (socketRef.current) {
+      socketRef.current.emit('call:end', {
         callId: activeCall.callId,
-        endedByName: currentUserName,
+        patientId: activeCall.patientId,
+        doctorId: activeCall.doctorId || currentUserId,
         duration: callDuration,
-      },
-    });
+      });
+    }
 
     setCallState('ended');
     setTimeout(() => {
       setCallState('idle');
       setActiveCall(null);
       setCallDuration(0);
-    }, 1500);
-  }, [activeCall, broadcastCallEvent, callDuration, currentUserName, stopMediaStream, stopRingtone]);
+    }, 1200);
+  }, [activeCall, closePeerConnection, callDuration, currentUserId, stopMediaStream, stopRingtone]);
 
   // Audio/Video Mute toggles
   const toggleMute = useCallback(() => {
@@ -478,37 +764,6 @@ export function VideoCallProvider({ children }) {
     }
     setIsCameraOff(!isCameraOff);
   }, [isCameraOff]);
-
-  // For testing: simulate an incoming call from a patient to the doctor
-  const simulateIncomingPatientCall = useCallback(() => {
-    const mockCall = {
-      callId: `CALL-SIM-${Date.now()}`,
-      callerId: 'pat-2026-2007',
-      callerName: 'Akash Soni',
-      callerRole: 'patient',
-      callerPhone: '+91 86018 45515',
-      patientId: 'PAT-2026-2007',
-      patientName: 'Akash Soni',
-      recipientId: currentUserId,
-      recipientName: isDoctor ? currentUserName : (session?.doctorName || 'Assigned Physician'),
-      recipientTitle: isDoctor ? (session?.specialty || 'Attending Physician') : 'Attending Physician',
-      recipientDepartment: 'Cardiology Ward 4B',
-      doctorName: isDoctor ? currentUserName : (session?.doctorName || 'Assigned Physician'),
-      isAssignedDoctor: true,
-      vitalsSnapshot: {
-        heartRate: 74,
-        spo2: 98,
-        temperature: 36.8,
-        status: 'Normal Sinus Rhythm',
-      },
-      startedAt: Date.now(),
-    };
-
-    setActiveCall(mockCall);
-    setCallState('incoming');
-    startRingtone();
-    toast('Incoming simulated patient video call...', { icon: '📞' });
-  }, [currentUserId, currentUserName, isDoctor, startRingtone]);
 
   // Format call duration MM:SS
   const formattedDuration = `${String(Math.floor(callDuration / 60)).padStart(2, '0')}:${String(callDuration % 60).padStart(2, '0')}`;
@@ -530,8 +785,8 @@ export function VideoCallProvider({ children }) {
     isCameraOff,
     toggleMute,
     toggleCamera,
-    localStream: localStreamRef.current,
-    simulateIncomingPatientCall,
+    localStream,
+    remoteStream,
     hospitalPhysicians: HOSPITAL_PHYSICIANS,
   };
 
