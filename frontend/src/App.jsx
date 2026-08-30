@@ -26,6 +26,7 @@ import { VideoCallProvider } from './context/VideoCallContext';
 import { VideoCallDialerModal } from './components/videocall/VideoCallDialerModal';
 import { IncomingCallModal } from './components/videocall/IncomingCallModal';
 import { ActiveVideoCallModal } from './components/videocall/ActiveVideoCallModal';
+import { EmergencyProvider } from './context/EmergencyContext';
 
 function AuthRoute({ children }) {
   const session = getAuthSession();
@@ -96,9 +97,11 @@ function ScopedPatientDetailsRoute() {
   }
 
   return (
-    <MainLayout>
-      <PatientDetails />
-    </MainLayout>
+    <EmergencyProvider>
+      <MainLayout>
+        <PatientDetails />
+      </MainLayout>
+    </EmergencyProvider>
   );
 }
 

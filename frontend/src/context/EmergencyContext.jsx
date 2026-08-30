@@ -523,7 +523,37 @@ export function EmergencyProvider({ children, vitalsContext }) {
 export function useEmergency() {
   const context = useContext(EmergencyContext);
   if (!context) {
-    throw new Error('useEmergency must be used within an EmergencyProvider');
+    return {
+      emergencyState: 'NORMAL',
+      activeEmergency: null,
+      doctorActiveEmergencies: [],
+      location: null,
+      locationStatus: 'unavailable',
+      locationPermission: 'denied',
+      locationError: '',
+      lastLocationTime: null,
+      locationSharingEnabled: false,
+      emergencyLocationSharingEnabled: false,
+      thresholds: DEFAULT_CRITICAL_SETTINGS,
+      sosContact: null,
+      consentModalOpen: false,
+      emergencyModalOpen: false,
+      ambulanceModalOpen: false,
+      ambulanceRequested: false,
+      ambulanceDispatchInfo: null,
+      isDemoMode: false,
+      setConsentModalOpen: () => {},
+      setEmergencyModalOpen: () => {},
+      setAmbulanceModalOpen: () => {},
+      requestLocationPermission: () => {},
+      fetchLocationSilently: () => {},
+      triggerEmergency: () => {},
+      requestAmbulance: () => {},
+      acknowledgeEmergency: () => {},
+      resolveEmergency: () => {},
+      simulateCriticalEmergency: () => {},
+      refreshDoctorEmergencies: () => {},
+    };
   }
   return context;
 }
