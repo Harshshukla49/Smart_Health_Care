@@ -1,5 +1,5 @@
 import { RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
-import { firebaseAuth, missingFirebaseConfigKeys } from './firebase';
+import { auth, missingFirebaseConfigKeys } from './firebase';
 
 const DEFAULT_COUNTRY_CODE = '+91';
 
@@ -72,7 +72,7 @@ const mapFirebasePhoneError = (error, phase = 'send') => {
 };
 
 const assertFirebaseReady = () => {
-  if (!firebaseAuth) {
+  if (!auth) {
     const missing = Array.isArray(missingFirebaseConfigKeys) && missingFirebaseConfigKeys.length > 0
       ? `Missing: ${missingFirebaseConfigKeys.join(', ')}.`
       : 'Firebase config is invalid.';
@@ -108,7 +108,7 @@ const ensureRecaptcha = async (containerId = 'recaptcha-container') => {
   }
 
   if (!recaptchaVerifier) {
-    recaptchaVerifier = new RecaptchaVerifier(firebaseAuth, containerId, {
+    recaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
       size: 'invisible',
       callback: () => {
         // Auto callback from invisible reCAPTCHA.
@@ -124,13 +124,17 @@ const ensureRecaptcha = async (containerId = 'recaptcha-container') => {
   return recaptchaVerifier;
 };
 
-export const sendOTP = async ({ phoneNumber, role, recaptchaContainerId = 'recaptcha-container' }) => {
+export const sendOTP = async (params) => {
   assertFirebaseReady();
+  const phoneNumber = typeof params === 'string' ? params : params?.phoneNumber;
+  const role = typeof params === 'object' ? params?.role : undefined;
+  const recaptchaContainerId = (typeof params === 'object' && params?.recaptchaContainerId) ? params.recaptchaContainerId : 'recaptcha-container';
+
   const normalizedPhone = normalizePhoneNumber(phoneNumber);
 
   try {
     const appVerifier = await ensureRecaptcha(recaptchaContainerId);
-    confirmationResult = await signInWithPhoneNumber(firebaseAuth, normalizedPhone, appVerifier);
+    confirmationResult = await signInWithPhoneNumber(auth, normalizedPhone, appVerifier);
 
     return {
       phone: normalizedPhone,
@@ -145,12 +149,13 @@ export const sendOTP = async ({ phoneNumber, role, recaptchaContainerId = 'recap
   }
 };
 
-export const verifyOTP = async ({ otpCode }) => {
+export const verifyOTP = async (params) => {
   assertFirebaseReady();
   if (!confirmationResult) {
     throw new Error('Request OTP first before verification.');
   }
 
+  const otpCode = typeof params === 'string' ? params : params?.otpCode;
   const cleanOtp = String(otpCode || '').trim();
   if (!/^\d{6}$/.test(cleanOtp)) {
     throw new Error('Enter a valid 6-digit OTP.');

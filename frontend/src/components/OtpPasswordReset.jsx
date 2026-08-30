@@ -66,6 +66,12 @@ export function OtpPasswordReset({ role, defaultPhone = '' }) {
     return () => clearInterval(timer);
   }, [resendIn]);
 
+  useEffect(() => {
+    return () => {
+      clearPhoneOtpSession();
+    };
+  }, []);
+
   const handleSendOtp = async () => {
     const trimmed = String(phone || '').trim();
     if (!trimmed) {

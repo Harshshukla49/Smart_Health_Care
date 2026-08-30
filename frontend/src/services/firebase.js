@@ -1,49 +1,58 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
-const DEFAULT_FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyCqlojCmA8TFc5iXqMXXA5PQ5p1fi8um7o',
-  authDomain: 'smart-health-care-cd723.firebaseapp.com',
-  projectId: 'smart-health-care-cd723',
-  appId: '1:607879480771:web:b4e19a21bf9be9b79e6976',
-  databaseURL: 'https://smart-health-care-cd723-default-rtdb.asia-southeast1.firebasedatabase.app',
-  storageBucket: 'smart-health-care-cd723.firebasestorage.app',
-  messagingSenderId: '607879480771',
-  measurementId: 'G-GWC7VP64LK',
-};
-
 const firebaseConfig = {
-  apiKey: (import.meta.env.VITE_FIREBASE_API_KEY || DEFAULT_FIREBASE_CONFIG.apiKey || '').trim(),
-  authDomain: (import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || DEFAULT_FIREBASE_CONFIG.authDomain || '').trim(),
-  projectId: (import.meta.env.VITE_FIREBASE_PROJECT_ID || DEFAULT_FIREBASE_CONFIG.projectId || '').trim(),
-  appId: (import.meta.env.VITE_FIREBASE_APP_ID || DEFAULT_FIREBASE_CONFIG.appId || '').trim(),
-  databaseURL: (import.meta.env.VITE_FIREBASE_DATABASE_URL || DEFAULT_FIREBASE_CONFIG.databaseURL || '').trim(),
-  storageBucket: (import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || DEFAULT_FIREBASE_CONFIG.storageBucket || '').trim(),
-  messagingSenderId: (import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || DEFAULT_FIREBASE_CONFIG.messagingSenderId || '').trim(),
-  measurementId: (import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || DEFAULT_FIREBASE_CONFIG.measurementId || '').trim(),
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID,
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
 };
 
-const missingConfig = ['apiKey', 'authDomain', 'projectId', 'appId']
-  .filter((key) => !firebaseConfig[key]);
-
-if (missingConfig.length > 0) {
+// Safe development-only configuration check (never exposes private credentials)
+if (import.meta.env.DEV) {
   // eslint-disable-next-line no-console
-  console.warn(`Missing Firebase config keys: ${missingConfig.join(', ')}`);
+  console.log('[Firebase Environment Check]', {
+    'Firebase API Key': firebaseConfig.apiKey ? 'configured' : 'MISSING',
+    'Firebase Auth Domain': firebaseConfig.authDomain ? 'configured' : 'MISSING',
+    'Firebase Project ID': firebaseConfig.projectId ? 'configured' : 'MISSING',
+    'Firebase App ID': firebaseConfig.appId ? 'configured' : 'MISSING',
+    'Firebase Storage Bucket': firebaseConfig.storageBucket ? 'configured' : 'MISSING (optional)',
+    'Firebase Messaging Sender ID': firebaseConfig.messagingSenderId ? 'configured' : 'MISSING (optional)',
+    'Firebase Database URL': firebaseConfig.databaseURL ? 'configured' : 'MISSING (optional)',
+  });
 }
 
-let firebaseApp = null;
-let firebaseAuth = null;
+// Track required keys for phone authentication
+const requiredKeys = ['apiKey', 'authDomain', 'projectId', 'appId'];
+const missingFirebaseConfigKeys = requiredKeys.filter((key) => !firebaseConfig[key]);
+
+if (missingFirebaseConfigKeys.length > 0) {
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[Firebase] Missing configuration keys for phone auth: ${missingFirebaseConfigKeys.join(', ')}. ` +
+    'Ensure frontend/.env contains VITE_FIREBASE_* variables and restart the Vite server.'
+  );
+}
+
+// Initialize Firebase only once
+let app = null;
+let auth = null;
 
 try {
-  if (missingConfig.length === 0) {
-    firebaseApp = initializeApp(firebaseConfig);
-    firebaseAuth = getAuth(firebaseApp);
+  if (missingFirebaseConfigKeys.length === 0) {
+    app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
+    auth = getAuth(app);
   }
 } catch (error) {
   // eslint-disable-next-line no-console
-  console.error('Firebase initialization failed:', error);
+  console.error('[Firebase] Initialization error:', error);
 }
 
-const missingFirebaseConfigKeys = missingConfig;
-
-export { firebaseApp, firebaseAuth, missingFirebaseConfigKeys };
+// Standard exports
+export const firebaseApp = app;
+export const firebaseAuth = auth;
+export { app, auth, firebaseConfig, missingFirebaseConfigKeys };
+export default app;
