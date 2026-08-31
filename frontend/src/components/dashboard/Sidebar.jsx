@@ -23,35 +23,38 @@ import {
   X,
 } from 'lucide-react';
 import { clearAuthSession, getAuthSession } from '../../utils/auth';
+import { useI18n } from '../../context/I18nContext';
+import { LanguageSwitcher } from '../LanguageSwitcher';
 
-function getNavigationSections(role) {
+function getNavigationSections(role, t) {
   const isDoctor = role === 'doctor';
+  const tr = (key, fallback) => (t ? t(key) : fallback);
 
   if (!isDoctor) {
     // PATIENT SCOPED NAVIGATION:
     return [
       {
-        title: 'MY HEALTH',
+        title: tr('layout.nav.myHealth', 'MY HEALTH'),
         items: [
-          { id: 'overview', label: 'Health Overview', to: '/dashboard', icon: LayoutDashboard },
-          { id: 'vitals', label: 'My Live Vitals', to: '/dashboard#vitals', icon: Activity },
-          { id: 'medications', label: 'My Medications', to: '/dashboard#medications', icon: Pill },
-          { id: 'ai-assessment', label: 'AI Health Assessment', to: '/dashboard#ai-assessment', icon: BrainCircuit },
-          { id: 'patients', label: 'My Care Team', to: '/dashboard#patients', icon: UsersRound },
+          { id: 'overview', label: tr('layout.nav.healthOverview', 'Health Overview'), to: '/dashboard', icon: LayoutDashboard },
+          { id: 'vitals', label: tr('layout.nav.myLiveVitals', 'My Live Vitals'), to: '/dashboard#vitals', icon: Activity },
+          { id: 'medications', label: tr('layout.nav.myMedications', 'My Medications'), to: '/dashboard#medications', icon: Pill },
+          { id: 'ai-assessment', label: tr('layout.nav.aiAssessment', 'AI Health Assessment'), to: '/dashboard#ai-assessment', icon: BrainCircuit },
+          { id: 'patients', label: tr('layout.nav.myCareTeam', 'My Care Team'), to: '/dashboard#patients', icon: UsersRound },
         ],
       },
       {
-        title: 'RECORDS & ALERTS',
+        title: tr('layout.nav.recordsAlerts', 'RECORDS & ALERTS'),
         items: [
-          { id: 'ecg', label: 'My ECG Rhythm', to: '/dashboard#ecg', icon: Waves },
-          { id: 'reports', label: 'Health Reports', to: '/dashboard#reports', icon: FileText },
-          { id: 'alerts', label: 'Emergency & SOS', to: '/dashboard#alerts', icon: BellRing },
+          { id: 'ecg', label: tr('layout.nav.myEcgRhythm', 'My ECG Rhythm'), to: '/dashboard#ecg', icon: Waves },
+          { id: 'reports', label: tr('layout.nav.healthReports', 'Health Reports'), to: '/dashboard#reports', icon: FileText },
+          { id: 'alerts', label: tr('layout.nav.emergencySos', 'Emergency & SOS'), to: '/dashboard#alerts', icon: BellRing },
         ],
       },
       {
-        title: 'ACCOUNT',
+        title: tr('layout.nav.account', 'ACCOUNT'),
         items: [
-          { id: 'settings', label: 'Account & SOS', to: '/settings', icon: Settings },
+          { id: 'settings', label: tr('layout.nav.accountSos', 'Account & SOS'), to: '/settings', icon: Settings },
         ],
       },
     ];
@@ -60,29 +63,29 @@ function getNavigationSections(role) {
   // DOCTOR SCOPED NAVIGATION:
   return [
     {
-      title: 'CLINICAL COMMAND',
+      title: tr('layout.nav.clinicalCommand', 'CLINICAL COMMAND'),
       items: [
-        { id: 'overview', label: 'Ward Overview', to: '/dashboard', icon: LayoutDashboard },
-        { id: 'vitals', label: 'Live Monitoring', to: '/dashboard#vitals', icon: Activity },
-        { id: 'patients', label: 'Patients Roster', to: '/dashboard#patients', icon: UsersRound },
-        { id: 'medications', label: 'Prescriptions & Meds', to: '/dashboard#medications', icon: Pill },
-        { id: 'add-patient', label: 'Add Patient', to: '/add-patient', icon: PlusCircle },
+        { id: 'overview', label: tr('layout.nav.wardOverview', 'Ward Overview'), to: '/dashboard', icon: LayoutDashboard },
+        { id: 'vitals', label: tr('layout.nav.liveMonitoring', 'Live Monitoring'), to: '/dashboard#vitals', icon: Activity },
+        { id: 'patients', label: tr('layout.nav.patientsRoster', 'Patients Roster'), to: '/dashboard#patients', icon: UsersRound },
+        { id: 'medications', label: tr('layout.nav.prescriptionsMeds', 'Prescriptions & Meds'), to: '/dashboard#medications', icon: Pill },
+        { id: 'add-patient', label: tr('layout.nav.addPatient', 'Add Patient'), to: '/add-patient', icon: PlusCircle },
       ],
     },
     {
-      title: 'DIAGNOSTICS & TRIAGE',
+      title: tr('layout.nav.diagnosticsTriage', 'DIAGNOSTICS & TRIAGE'),
       items: [
-        { id: 'ai-assessment', label: 'AI Assessment & First Aid', to: '/dashboard#ai-assessment', icon: BrainCircuit },
-        { id: 'insights', label: 'Risk Predictions', to: '/dashboard#insights', icon: ShieldAlert },
-        { id: 'ecg', label: 'ECG Analysis', to: '/dashboard#ecg', icon: Waves },
-        { id: 'reports', label: 'Clinical Reports', to: '/dashboard#reports', icon: FileText },
-        { id: 'alerts', label: 'Emergency Alerts', to: '/dashboard#alerts', icon: BellRing },
+        { id: 'ai-assessment', label: tr('layout.nav.aiAssessmentTriage', 'AI Assessment & First Aid'), to: '/dashboard#ai-assessment', icon: BrainCircuit },
+        { id: 'insights', label: tr('layout.nav.riskPredictions', 'Risk Predictions'), to: '/dashboard#insights', icon: ShieldAlert },
+        { id: 'ecg', label: tr('layout.nav.ecgAnalysis', 'ECG Analysis'), to: '/dashboard#ecg', icon: Waves },
+        { id: 'reports', label: tr('layout.nav.clinicalReports', 'Clinical Reports'), to: '/dashboard#reports', icon: FileText },
+        { id: 'alerts', label: tr('layout.nav.emergencyAlerts', 'Emergency Alerts'), to: '/dashboard#alerts', icon: BellRing },
       ],
     },
     {
-      title: 'SYSTEM',
+      title: tr('layout.nav.system', 'SYSTEM'),
       items: [
-        { id: 'settings', label: 'Clinical Settings', to: '/settings', icon: Settings },
+        { id: 'settings', label: tr('layout.nav.clinicalSettings', 'Clinical Settings'), to: '/settings', icon: Settings },
       ],
     },
   ];
@@ -97,9 +100,10 @@ function SidebarLinks({
   mobile = false,
   role = 'patient',
 }) {
+  const { t } = useI18n();
   const location = useLocation();
   const navigate = useNavigate();
-  const navigationSections = getNavigationSections(role);
+  const navigationSections = getNavigationSections(role, t);
 
   const isItemActive = (item) => {
     if (item.id === 'settings' || item.to === '/settings') {
@@ -254,6 +258,7 @@ export function Sidebar({
   collapsed = false,
   role = 'patient',
 }) {
+  const { t } = useI18n();
   const navigate = useNavigate();
   const activeSession = getAuthSession();
   const isDoctor = (activeSession?.role || role) === 'doctor';
@@ -296,27 +301,29 @@ export function Sidebar({
           <SidebarLinks
             activeSection={activeSection}
             onSectionSelect={onSectionSelect}
-            onLogout={handleLogout}
             collapsed={collapsed}
             role={activeSession?.role || role}
           />
         </div>
 
-        {/* Bottom Profile & Role Isolation Card */}
-        <div className="mt-3 space-y-2.5 pt-3 border-t border-slate-100">
-          <div
-            className={`rounded-xl border border-slate-200/90 bg-slate-50/70 p-2.5 shadow-2xs ${
-              collapsed ? 'flex justify-center p-2' : ''
-            }`}
-          >
+        {/* Sidebar Footer Controls & User Card */}
+        <div className="mt-3 border-t border-slate-100 pt-3 space-y-2.5">
+          {/* Compact Language Selector for Desktop */}
+          {!collapsed && (
+            <div className="flex items-center justify-between px-1">
+              <span className="text-[11px] font-semibold text-slate-500">{t('layout.languageLabel')}</span>
+              <LanguageSwitcher compact theme="light" />
+            </div>
+          )}
+
+          <div className="rounded-xl border border-slate-200/80 bg-slate-50/70 p-2 shadow-2xs">
             <div className="flex items-center gap-2.5">
               <span
-                className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border text-xs font-bold text-white shadow-xs ${
+                className={`grid h-8 w-8 shrink-0 place-items-center rounded-full text-xs font-bold text-white shadow-2xs ${
                   isDoctor
-                    ? 'bg-gradient-to-br from-[#0284C7] to-blue-700 border-white ring-1 ring-sky-200'
-                    : 'bg-gradient-to-br from-sky-500 to-teal-600 border-white ring-1 ring-teal-200'
+                    ? 'bg-gradient-to-br from-[#0284C7] to-blue-700'
+                    : 'bg-gradient-to-br from-teal-600 to-emerald-700'
                 }`}
-                title={`${userName} (${userRoleTitle})`}
               >
                 {userInitials}
               </span>
@@ -340,10 +347,10 @@ export function Sidebar({
                 type="button"
                 onClick={handleLogout}
                 className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50/70 py-1.5 text-xs font-bold text-rose-700 transition hover:bg-rose-100 hover:border-rose-300 shadow-2xs"
-                title="Logout"
+                title={t('common.logout')}
               >
                 <LogOut className="h-3.5 w-3.5 text-rose-600" />
-                <span>Logout</span>
+                <span>{t('common.logout')}</span>
               </button>
             ) : null}
           </div>
@@ -354,12 +361,12 @@ export function Sidebar({
               <ShieldCheck className={`h-4 w-4 shrink-0 mt-0.5 ${isDoctor ? 'text-[#0284C7]' : 'text-teal-600'}`} />
               <div>
                 <p className="text-[11px] font-bold text-[#0F172A] leading-tight">
-                  {isDoctor ? 'Clinical Role Scoped' : 'Personal Data Scoped'}
+                  {isDoctor ? t('layout.clinicalRoleScoped') : t('layout.personalDataScoped')}
                 </p>
                 <p className="mt-0.5 text-[10px] text-[#64748B] leading-tight">
                   {isDoctor
-                    ? 'Authorized for ward patient triage and telemetry monitoring.'
-                    : 'Restricted strictly to your personal medical records.'}
+                    ? t('layout.clinicalRoleDesc')
+                    : t('layout.personalDataDesc')}
                 </p>
               </div>
             </div>
@@ -412,14 +419,18 @@ export function Sidebar({
                 />
               </div>
 
-              <div className="mt-4 border-t border-slate-100 pt-3">
+              <div className="mt-4 border-t border-slate-100 pt-3 space-y-2.5">
+                <div className="flex items-center justify-between px-1">
+                  <span className="text-xs font-semibold text-slate-600">{t('layout.languageLabel')}</span>
+                  <LanguageSwitcher compact theme="light" />
+                </div>
                 <button
                   type="button"
                   onClick={handleLogout}
                   className="flex w-full items-center justify-center gap-2 rounded-xl border border-rose-200 bg-rose-50/70 py-2 text-xs font-bold text-rose-700 shadow-2xs"
                 >
                   <LogOut className="h-4 w-4" />
-                  <span>Logout</span>
+                  <span>{t('common.logout')}</span>
                 </button>
               </div>
             </motion.aside>

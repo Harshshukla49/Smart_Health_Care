@@ -1,6 +1,24 @@
-import React, { createContext, useContext, useMemo, useState } from 'react';
+import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
-const STORAGE_KEY = 'smart-health-language';
+const GLOBAL_STORAGE_KEY = 'smart-health-language';
+
+export const getUserLanguageStorageKey = () => {
+  if (typeof window === 'undefined') {
+    return GLOBAL_STORAGE_KEY;
+  }
+  try {
+    const raw = window.localStorage.getItem('smart-health-auth-session');
+    if (raw) {
+      const session = JSON.parse(raw);
+      const id = session?.patientId || session?.doctorId || session?.email || session?.id;
+      const role = session?.role || 'user';
+      if (id) {
+        return `smart-health-language_${role}_${String(id).toLowerCase()}`;
+      }
+    }
+  } catch {}
+  return GLOBAL_STORAGE_KEY;
+};
 
 const resources = {
   en: {
@@ -19,6 +37,20 @@ const resources = {
       unavailable: 'Unavailable',
       pending: 'Pending',
       noEmailStored: 'No email stored',
+      active: 'Active',
+      standby: 'Standby',
+      ready: 'Ready',
+      sync: 'sync',
+      secondsAgo: '{seconds}s ago',
+    },
+    statuses: {
+      normal: 'Normal',
+      stable: 'Stable',
+      monitoring: 'Monitoring',
+      warning: 'Warning',
+      attention: 'Attention',
+      critical: 'Critical',
+      offline: 'Offline',
     },
     roles: {
       doctor: 'Doctor',
@@ -30,13 +62,46 @@ const resources = {
       roleDashboard: '{role} dashboard',
       signedInAs: 'Signed in as',
       secureSession: '{role} secure session',
+      secureSessionActive: 'Secure session active',
+      clinicalWorkspace: 'Clinical Workspace',
+      personalWorkspace: 'Personal Health Workspace',
       nav: {
         overview: 'Overview',
         vitals: 'Vitals',
         alerts: 'Alerts',
         insights: 'Insights',
+        myHealth: 'MY HEALTH',
+        clinicalCommand: 'CLINICAL COMMAND',
+        recordsAlerts: 'RECORDS & ALERTS',
+        diagnosticsTriage: 'DIAGNOSTICS & TRIAGE',
+        account: 'ACCOUNT',
+        system: 'SYSTEM',
+        healthOverview: 'Health Overview',
+        wardOverview: 'Ward Overview',
+        myLiveVitals: 'My Live Vitals',
+        liveMonitoring: 'Live Monitoring',
+        myMedications: 'My Medications',
+        prescriptionsMeds: 'Prescriptions & Meds',
+        aiAssessment: 'AI Health Assessment',
+        aiAssessmentTriage: 'AI Assessment & First Aid',
+        myCareTeam: 'My Care Team',
+        patientsRoster: 'Patients Roster',
+        addPatient: 'Add Patient',
+        myEcgRhythm: 'My ECG Rhythm',
+        ecgAnalysis: 'ECG Analysis',
+        healthReports: 'Health Reports',
+        clinicalReports: 'Clinical Reports',
+        emergencySos: 'Emergency & SOS',
+        emergencyAlerts: 'Emergency Alerts',
+        riskPredictions: 'Risk Predictions',
+        accountSos: 'Account & SOS',
+        clinicalSettings: 'Clinical Settings',
       },
       sidebarDescription: 'Role-based monitoring with smooth transitions, glass panels, and clear patient signals.',
+      clinicalRoleScoped: 'Clinical Role Scoped',
+      personalDataScoped: 'Personal Data Scoped',
+      clinicalRoleDesc: 'Authorized for ward patient triage and telemetry monitoring.',
+      personalDataDesc: 'Restricted strictly to your personal medical records.',
       languageLabel: 'Language',
       openNavigation: 'Open navigation',
       closeNavigation: 'Close navigation',
@@ -234,14 +299,36 @@ const resources = {
       title: 'Unified live dashboard',
       subtitle: 'Real-time heart rate, SpO2, temperature, and ECG waveform in one monitoring workspace.',
       loadingVitals: 'Loading live vitals',
+      welcomeBack: 'Welcome back, {name}',
+      clinicalCommandWard: 'Clinical Command Ward',
+      personalHealthWorkspace: 'Personal Health Workspace',
+      doctorTelemetryDesc: 'Continuous telemetry stream and clinical risk overview across your active ward roster.',
+      patientTelemetryDesc: 'Your vital signs, heart rhythm telemetry, and AI health assessment are monitored in real time.',
+      liveBadge: '250 Hz Live',
+      wardBadge: 'Ward 4A',
       cards: {
         monitoringState: 'Monitoring State',
         signalFreshness: 'Signal Freshness',
         protectionMode: 'Protection Mode',
         doctorScope: 'Doctor Scope',
+        assignedRoster: 'Assigned Roster',
+        emergencyReadiness: 'Emergency Readiness',
+        confidence: 'Confidence',
+        latency: 'Latency',
+        latencyValue: '350ms sync',
+        liveStream: 'Live Stream',
+        gpsLocked: 'GPS Locked',
+        standby: 'Standby',
+        ready: 'Ready',
+        ambulanceSos: 'Ambulance SOS',
+        activeApi: 'Active API',
+        patientSingular: '1 Patient',
+        patientPlural: '{count} Patients',
+        activeLabel: 'active',
+        ward: 'Ward',
+        wardName: 'Cardiology Ward 4B',
         stableMonitoring: 'Stable monitoring',
         criticalAttention: 'Critical attention',
-        liveStream: 'Live stream',
         pendingSync: 'Pending sync',
         roleBasedSecure: 'Role-based secure',
         personalView: 'Personal view',
@@ -422,6 +509,20 @@ const resources = {
       unavailable: 'उपलब्ध नहीं',
       pending: 'लंबित',
       noEmailStored: 'ईमेल उपलब्ध नहीं',
+      active: 'सक्रिय',
+      standby: 'स्टैंडबाय',
+      ready: 'तैयार',
+      sync: 'सिंक',
+      secondsAgo: '{seconds} से. पहले',
+    },
+    statuses: {
+      normal: 'सामान्य',
+      stable: 'स्थिर',
+      monitoring: 'मॉनिटरिंग',
+      warning: 'चेतावनी',
+      attention: 'ध्यान दें',
+      critical: 'क्रिटिकल',
+      offline: 'ऑफलाइन',
     },
     roles: {
       doctor: 'डॉक्टर',
@@ -433,13 +534,46 @@ const resources = {
       roleDashboard: '{role} डैशबोर्ड',
       signedInAs: 'लॉगिन उपयोगकर्ता',
       secureSession: '{role} सुरक्षित सत्र',
+      secureSessionActive: 'सुरक्षित सत्र सक्रिय',
+      clinicalWorkspace: 'क्लिनिकल वर्कस्पेस',
+      personalWorkspace: 'पर्सनल हेल्थ वर्कस्पेस',
       nav: {
         overview: 'ओवरव्यू',
         vitals: 'वाइटल्स',
         alerts: 'अलर्ट्स',
         insights: 'इनसाइट्स',
+        myHealth: 'मेरा स्वास्थ्य',
+        clinicalCommand: 'क्लिनिकल कमांड',
+        recordsAlerts: 'रिकॉर्ड्स और अलर्ट्स',
+        diagnosticsTriage: 'डायग्नोस्टिक्स और ट्रायेज',
+        account: 'खाता',
+        system: 'सिस्टम',
+        healthOverview: 'स्वास्थ्य ओवरव्यू',
+        wardOverview: 'वार्ड ओवरव्यू',
+        myLiveVitals: 'मेरे लाइव वाइटल्स',
+        liveMonitoring: 'लाइव मॉनिटरिंग',
+        myMedications: 'मेरी दवाइयां',
+        prescriptionsMeds: 'प्रिस्क्रिप्शन और दवाएं',
+        aiAssessment: 'एआई स्वास्थ्य मूल्यांकन',
+        aiAssessmentTriage: 'एआई मूल्यांकन और प्राथमिक उपचार',
+        myCareTeam: 'मेरी केयर टीम',
+        patientsRoster: 'मरीजों की सूची',
+        addPatient: 'मरीज जोड़ें',
+        myEcgRhythm: 'मेरा ईसीजी रिदम',
+        ecgAnalysis: 'ईसीजी विश्लेषण',
+        healthReports: 'स्वास्थ्य रिपोर्ट',
+        clinicalReports: 'क्लिनिकल रिपोर्ट',
+        emergencySos: 'आपातकालीन और एसओएस',
+        emergencyAlerts: 'आपातकालीन अलर्ट्स',
+        riskPredictions: 'जोखिम पूर्वानुमान',
+        accountSos: 'खाता और एसओएस',
+        clinicalSettings: 'क्लिनिकल सेटिंग्स',
       },
       sidebarDescription: 'रोल-आधारित मॉनिटरिंग, स्मूद ट्रांजिशन और स्पष्ट रोगी संकेतों के साथ।',
+      clinicalRoleScoped: 'क्लिनिकल रोल सुरक्षित',
+      personalDataScoped: 'व्यक्तिगत डेटा सुरक्षित',
+      clinicalRoleDesc: 'वार्ड मरीज ट्रायेज और टेलीमेट्री मॉनिटरिंग के लिए अधिकृत।',
+      personalDataDesc: 'केवल आपके व्यक्तिगत मेडिकल रिकॉर्ड तक सीमित।',
       languageLabel: 'भाषा',
       openNavigation: 'नेविगेशन खोलें',
       closeNavigation: 'नेविगेशन बंद करें',
@@ -637,14 +771,36 @@ const resources = {
       title: 'एकीकृत लाइव डैशबोर्ड',
       subtitle: 'एक ही मॉनिटरिंग वर्कस्पेस में रियल-टाइम हार्ट रेट, SpO2, तापमान और ECG वेवफॉर्म।',
       loadingVitals: 'लाइव वाइटल्स लोड हो रहे हैं',
+      welcomeBack: 'स्वागत है, {name}',
+      clinicalCommandWard: 'क्लिनिकल कमांड वार्ड',
+      personalHealthWorkspace: 'पर्सनल हेल्थ वर्कस्पेस',
+      doctorTelemetryDesc: 'आपके एक्टिव वार्ड रोस्टर में निरंतर टेलीमेट्री स्ट्रीम और क्लिनिकल रिस्क ओवरव्यू।',
+      patientTelemetryDesc: 'आपके वाइटल संकेत, हार्ट रिदम टेलीमेट्री और एआई स्वास्थ्य मूल्यांकन रियल-टाइम में मॉनिटर हो रहे हैं।',
+      liveBadge: '250 Hz लाइव',
+      wardBadge: 'वार्ड 4A',
       cards: {
         monitoringState: 'मॉनिटरिंग स्थिति',
         signalFreshness: 'सिग्नल ताज़गी',
         protectionMode: 'सुरक्षा मोड',
         doctorScope: 'डॉक्टर स्कोप',
+        assignedRoster: 'आवंटित रोस्टर',
+        emergencyReadiness: 'आपातकालीन तैयारी',
+        confidence: 'विश्वसनीयता',
+        latency: 'विलंबता',
+        latencyValue: '350ms सिंक',
+        liveStream: 'लाइव स्ट्रीम',
+        gpsLocked: 'जीपीएस लॉक',
+        standby: 'स्टैंडबाय',
+        ready: 'तैयार',
+        ambulanceSos: 'एम्बुलेंस एसओएस',
+        activeApi: 'सक्रिय एपीआई',
+        patientSingular: '1 मरीज',
+        patientPlural: '{count} मरीज',
+        activeLabel: 'सक्रिय',
+        ward: 'वार्ड',
+        wardName: 'कार्डियोलॉजी वार्ड 4B',
         stableMonitoring: 'स्थिर मॉनिटरिंग',
         criticalAttention: 'तुरंत ध्यान दें',
-        liveStream: 'लाइव स्ट्रीम',
         pendingSync: 'सिंक लंबित',
         roleBasedSecure: 'रोल-आधारित सुरक्षा',
         personalView: 'व्यक्तिगत दृश्य',
@@ -825,6 +981,20 @@ const resources = {
       unavailable: 'No disponible',
       pending: 'Pendiente',
       noEmailStored: 'Sin correo registrado',
+      active: 'Activo',
+      standby: 'En espera',
+      ready: 'Listo',
+      sync: 'sincronizado',
+      secondsAgo: 'hace {seconds}s',
+    },
+    statuses: {
+      normal: 'Normal',
+      stable: 'Estable',
+      monitoring: 'Monitoreo',
+      warning: 'Advertencia',
+      attention: 'Atencion',
+      critical: 'Critico',
+      offline: 'Desconectado',
     },
     roles: {
       doctor: 'Doctor',
@@ -836,13 +1006,46 @@ const resources = {
       roleDashboard: 'Panel de {role}',
       signedInAs: 'Sesion iniciada como',
       secureSession: 'Sesion segura de {role}',
+      secureSessionActive: 'Sesion segura activa',
+      clinicalWorkspace: 'Espacio Clinico',
+      personalWorkspace: 'Espacio de Salud Personal',
       nav: {
         overview: 'Resumen',
         vitals: 'Signos vitales',
         alerts: 'Alertas',
         insights: 'Analisis',
+        myHealth: 'MI SALUD',
+        clinicalCommand: 'COMANDO CLINICO',
+        recordsAlerts: 'REGISTROS Y ALERTAS',
+        diagnosticsTriage: 'DIAGNOSTICO Y TRIAJE',
+        account: 'CUENTA',
+        system: 'SISTEMA',
+        healthOverview: 'Resumen de Salud',
+        wardOverview: 'Resumen de Sala',
+        myLiveVitals: 'Mis Signos en Vivo',
+        liveMonitoring: 'Monitoreo en Vivo',
+        myMedications: 'Mis Medicamentos',
+        prescriptionsMeds: 'Recetas y Medicamentos',
+        aiAssessment: 'Evaluacion de Salud IA',
+        aiAssessmentTriage: 'Evaluacion IA y Primeros Auxilios',
+        myCareTeam: 'Mi Equipo de Atencion',
+        patientsRoster: 'Lista de Pacientes',
+        addPatient: 'Agregar Paciente',
+        myEcgRhythm: 'Mi Ritmo ECG',
+        ecgAnalysis: 'Analisis ECG',
+        healthReports: 'Informes de Salud',
+        clinicalReports: 'Informes Clinicos',
+        emergencySos: 'Emergencia y SOS',
+        emergencyAlerts: 'Alertas de Emergencia',
+        riskPredictions: 'Prediccion de Riesgos',
+        accountSos: 'Cuenta y SOS',
+        clinicalSettings: 'Configuracion Clinica',
       },
       sidebarDescription: 'Monitoreo por roles con transiciones fluidas, paneles claros y senales clinicas visibles.',
+      clinicalRoleScoped: 'Rol Clinico Protegido',
+      personalDataScoped: 'Datos Personales Protegidos',
+      clinicalRoleDesc: 'Autorizado para triaje de pacientes y monitoreo de telemetria.',
+      personalDataDesc: 'Restringido estrictamente a sus registros medicos personales.',
       languageLabel: 'Idioma',
       openNavigation: 'Abrir navegacion',
       closeNavigation: 'Cerrar navegacion',
@@ -1040,14 +1243,36 @@ const resources = {
       title: 'Panel en vivo unificado',
       subtitle: 'Frecuencia cardiaca, SpO2, temperatura y ECG en tiempo real en un solo espacio de monitoreo.',
       loadingVitals: 'Cargando signos vitales en vivo',
+      welcomeBack: 'Bienvenido de nuevo, {name}',
+      clinicalCommandWard: 'Sala de Mando Clinico',
+      personalHealthWorkspace: 'Espacio de Salud Personal',
+      doctorTelemetryDesc: 'Flujo continuo de telemetria y vision general de riesgo clinico en su lista activa de sala.',
+      patientTelemetryDesc: 'Sus signos vitales, telemetria del ritmo cardiaco y evaluacion de salud IA se monitorean en tiempo real.',
+      liveBadge: '250 Hz en vivo',
+      wardBadge: 'Sala 4A',
       cards: {
         monitoringState: 'Estado de monitoreo',
         signalFreshness: 'Actualizacion de senal',
         protectionMode: 'Modo de proteccion',
         doctorScope: 'Alcance medico',
+        assignedRoster: 'Lista Asignada',
+        emergencyReadiness: 'Preparacion de Emergencia',
+        confidence: 'Confianza',
+        latency: 'Latencia',
+        latencyValue: '350ms sync',
+        liveStream: 'Flujo en Vivo',
+        gpsLocked: 'GPS Bloqueado',
+        standby: 'En espera',
+        ready: 'Listo',
+        ambulanceSos: 'SOS Ambulancia',
+        activeApi: 'API Activa',
+        patientSingular: '1 Paciente',
+        patientPlural: '{count} Pacientes',
+        activeLabel: 'activo',
+        ward: 'Sala',
+        wardName: 'Sala de Cardiologia 4B',
         stableMonitoring: 'Monitoreo estable',
         criticalAttention: 'Atencion critica',
-        liveStream: 'Flujo en vivo',
         pendingSync: 'Sincronizacion pendiente',
         roleBasedSecure: 'Seguro por rol',
         personalView: 'Vista personal',
@@ -1237,12 +1462,33 @@ const getInitialLanguage = () => {
     return 'en';
   }
 
-  const stored = window.localStorage.getItem(STORAGE_KEY);
-  return resources[stored] ? stored : 'en';
+  const key = getUserLanguageStorageKey();
+  const userStored = window.localStorage.getItem(key);
+  if (userStored && resources[userStored]) {
+    return userStored;
+  }
+
+  const globalStored = window.localStorage.getItem(GLOBAL_STORAGE_KEY);
+  return resources[globalStored] ? globalStored : 'en';
 };
 
 export function I18nProvider({ children }) {
   const [language, setLanguage] = useState(getInitialLanguage);
+
+  // Sync language whenever user logs in, logs out, or switches accounts
+  useEffect(() => {
+    const handleAuthChange = () => {
+      const currentLang = getInitialLanguage();
+      setLanguage(currentLang);
+    };
+
+    window.addEventListener('smart-health-auth-change', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
+    return () => {
+      window.removeEventListener('smart-health-auth-change', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
+    };
+  }, []);
 
   const setAppLanguage = (nextLanguage) => {
     if (!resources[nextLanguage]) {
@@ -1251,7 +1497,12 @@ export function I18nProvider({ children }) {
 
     setLanguage(nextLanguage);
     if (typeof window !== 'undefined') {
-      window.localStorage.setItem(STORAGE_KEY, nextLanguage);
+      const userKey = getUserLanguageStorageKey();
+      window.localStorage.setItem(userKey, nextLanguage);
+      // Also update global fallback for unauthenticated views if guest
+      if (userKey === GLOBAL_STORAGE_KEY) {
+        window.localStorage.setItem(GLOBAL_STORAGE_KEY, nextLanguage);
+      }
     }
   };
 

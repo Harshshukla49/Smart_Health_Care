@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../context/I18nContext';
 
 const statusConfig = {
   Normal: {
@@ -32,11 +33,14 @@ const statusConfig = {
 };
 
 export function StatusPill({ status = 'Normal', size = 'sm', pulse = false }) {
+  const { t } = useI18n();
+
   const normalizedKey = Object.keys(statusConfig).find(
     (key) => key.toLowerCase() === String(status).toLowerCase()
   ) || 'Normal';
   
   const config = statusConfig[normalizedKey] || statusConfig.Normal;
+  const translatedStatus = t(`statuses.${normalizedKey.toLowerCase()}`) || status;
 
   return (
     <span
@@ -53,7 +57,7 @@ export function StatusPill({ status = 'Normal', size = 'sm', pulse = false }) {
           pulse ? 'animate-pulse' : '',
         ].join(' ')}
       />
-      <span>{status}</span>
+      <span>{translatedStatus}</span>
     </span>
   );
 }

@@ -39,6 +39,10 @@ export function setAuthSession(session) {
       loggedInAt: new Date().toISOString(),
     })
   );
+
+  try {
+    window.dispatchEvent(new CustomEvent('smart-health-auth-change', { detail: session }));
+  } catch {}
 }
 
 export function clearAuthSession() {
@@ -47,4 +51,7 @@ export function clearAuthSession() {
   }
 
   window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  try {
+    window.dispatchEvent(new CustomEvent('smart-health-auth-change', { detail: null }));
+  } catch {}
 }

@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { DashboardSidebar } from './dashboard/Sidebar';
+import { LanguageSwitcher } from './LanguageSwitcher';
 import { clearAuthSession, getAuthSession, normalizeRole } from '../utils/auth';
 import { useI18n } from '../context/I18nContext';
 import { useVideoCall } from '../context/VideoCallContext';
@@ -109,14 +110,19 @@ export function DashboardLayout({
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                   </span>
-                  <span>Secure session active</span>
+                  <span>{t('layout.secureSessionActive')}</span>
+                </div>
+
+                {/* Dashboard Language Switcher */}
+                <div className="inline-flex items-center">
+                  <LanguageSwitcher compact theme="light" />
                 </div>
 
                 {/* Notifications Button */}
                 <a
                   href="#alerts"
                   className="relative grid h-9 w-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-50 hover:text-slate-900 shadow-2xs"
-                  title="Clinical Alerts"
+                  title={t('layout.nav.alerts')}
                 >
                   <Bell className="h-4 w-4" />
                   <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-white" />
@@ -165,11 +171,11 @@ export function DashboardLayout({
                   type="button"
                   onClick={handleLogout}
                   className="inline-flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50/70 px-3 py-2 text-xs font-bold text-rose-700 transition hover:bg-rose-100 hover:border-rose-300 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-400 shadow-2xs"
-                  title="Logout"
-                  aria-label="Logout"
+                  title={t('common.logout')}
+                  aria-label={t('common.logout')}
                 >
                   <LogOut className="h-3.5 w-3.5 text-rose-600" />
-                  <span className="hidden xs:inline">Logout</span>
+                  <span className="hidden xs:inline">{t('common.logout')}</span>
                 </button>
               </div>
             </div>

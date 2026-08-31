@@ -518,15 +518,15 @@ function DashboardBody({ liveVitals }) {
                 <div className="max-w-2xl">
                   <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-[#0284C7]">
                     <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
-                    <span>{isDoctor ? 'Clinical Command Ward' : 'Personal Health Workspace'}</span>
+                    <span>{isDoctor ? t('dashboard.clinicalCommandWard') : t('dashboard.personalHealthWorkspace')}</span>
                   </div>
                   <h1 className="mt-3 font-sans text-2xl sm:text-3xl lg:text-[32px] font-extrabold tracking-tight text-[#0F172A]">
-                    Welcome back, {session?.name || (isDoctor ? 'Doctor' : 'Akash')}
+                    {t('dashboard.welcomeBack', { name: session?.name || (isDoctor ? 'Doctor' : 'Akash') })}
                   </h1>
                   <p className="mt-2 text-sm sm:text-base leading-relaxed text-[#64748B]">
                     {isDoctor
-                      ? 'Continuous telemetry stream and clinical risk overview across your active ward roster.'
-                      : 'Your vital signs, heart rhythm telemetry, and AI health assessment are monitored in real time.'}
+                      ? t('dashboard.doctorTelemetryDesc')
+                      : t('dashboard.patientTelemetryDesc')}
                   </p>
                 </div>
 
@@ -548,9 +548,9 @@ function DashboardBody({ liveVitals }) {
                       <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between rounded-lg bg-slate-900/85 backdrop-blur-md px-2.5 py-1 text-[10px] text-white shadow-xs">
                         <div className="flex items-center gap-1.5">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span className="font-bold">250 Hz Live</span>
+                          <span className="font-bold">{t('dashboard.liveBadge')}</span>
                         </div>
-                        <span className="text-slate-300 font-mono">Ward 4A</span>
+                        <span className="text-slate-300 font-mono">{t('dashboard.wardBadge')}</span>
                       </div>
                     </div>
                   </div>
@@ -558,14 +558,14 @@ function DashboardBody({ liveVitals }) {
               </div>
             </div>
 
-            {/* Summary Stat Cards (4 Cards) - Premium Medical SaaS Redesign */}
+            {/* Summary Stat Cards (4 Cards) - Premium Medical SaaS Redesign with Full i18n */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               {/* Card 1: Monitoring State */}
               <div className="group relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between">
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
-                      Monitoring State
+                      {t('dashboard.cards.monitoringState')}
                     </span>
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-[#0284C7] border border-sky-100 group-hover:scale-105 transition-transform">
                       <Activity className="h-4 w-4" />
@@ -574,14 +574,14 @@ function DashboardBody({ liveVitals }) {
 
                   <div className="mt-2.5 flex items-baseline gap-2.5">
                     <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
-                      {healthStatusLabel}
+                      {t(`statuses.${healthStatusLabel.toLowerCase()}`) || healthStatusLabel}
                     </h3>
                     <StatusPill status={healthStatusLabel} size="sm" pulse={isHighRisk} />
                   </div>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-[#64748B] font-medium">Confidence</span>
+                  <span className="text-[#64748B] font-medium">{t('dashboard.cards.confidence')}</span>
                   <span className="font-bold text-[#0F172A] bg-slate-100 px-2 py-0.5 rounded-md font-mono text-[11px]">
                     {displayConfidence}
                   </span>
@@ -593,7 +593,7 @@ function DashboardBody({ liveVitals }) {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
-                      Signal Freshness
+                      {t('dashboard.cards.signalFreshness')}
                     </span>
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-teal-50 text-[#0D9488] border border-teal-100 group-hover:scale-105 transition-transform">
                       <Waves className="h-4 w-4" />
@@ -606,15 +606,15 @@ function DashboardBody({ liveVitals }) {
                       <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
                     </span>
                     <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
-                      Live Stream
+                      {t('dashboard.cards.liveStream')}
                     </h3>
                   </div>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-[#64748B] font-medium">Latency</span>
+                  <span className="text-[#64748B] font-medium">{t('dashboard.cards.latency')}</span>
                   <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md font-mono text-[11px]">
-                    ● 350ms sync
+                    ● {t('dashboard.cards.latencyValue')}
                   </span>
                 </div>
               </div>
@@ -624,7 +624,7 @@ function DashboardBody({ liveVitals }) {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
-                      Emergency Readiness
+                      {t('dashboard.cards.emergencyReadiness')}
                     </span>
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 group-hover:scale-105 transition-transform">
                       <ShieldCheck className="h-4 w-4" />
@@ -633,21 +633,21 @@ function DashboardBody({ liveVitals }) {
 
                   <div className="mt-2.5 flex items-center gap-2">
                     <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
-                      {emergency?.locationStatus === 'active' ? 'GPS Locked' : 'Standby'}
+                      {emergency?.locationStatus === 'active' ? t('dashboard.cards.gpsLocked') : t('dashboard.cards.standby')}
                     </h3>
                     {emergency?.locationStatus === 'active' && (
                       <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
-                        Ready
+                        {t('dashboard.cards.ready')}
                       </span>
                     )}
                   </div>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-[#64748B] font-medium">Ambulance SOS</span>
+                  <span className="text-[#64748B] font-medium">{t('dashboard.cards.ambulanceSos')}</span>
                   <span className="font-semibold text-[#0F172A] flex items-center gap-1">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                    Active API
+                    {t('dashboard.cards.activeApi')}
                   </span>
                 </div>
               </div>
@@ -657,7 +657,7 @@ function DashboardBody({ liveVitals }) {
                 <div>
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
-                      {isDoctor ? 'Assigned Roster' : 'Doctor Scope'}
+                      {isDoctor ? t('dashboard.cards.assignedRoster') : t('dashboard.cards.doctorScope')}
                     </span>
                     <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-600 border border-violet-100 group-hover:scale-105 transition-transform">
                       <Users className="h-4 w-4" />
@@ -666,16 +666,20 @@ function DashboardBody({ liveVitals }) {
 
                   <div className="mt-2.5 flex items-baseline gap-2">
                     <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
-                      {role === 'doctor' ? `${patientCount} Patient${patientCount === 1 ? '' : 's'}` : '1 Patient'}
+                      {role === 'doctor'
+                        ? (patientCount === 1
+                            ? t('dashboard.cards.patientSingular')
+                            : t('dashboard.cards.patientPlural', { count: patientCount }))
+                        : t('dashboard.cards.patientSingular')}
                     </h3>
-                    <span className="text-xs text-[#64748B] font-medium">active</span>
+                    <span className="text-xs text-[#64748B] font-medium">{t('dashboard.cards.activeLabel')}</span>
                   </div>
                 </div>
 
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
-                  <span className="text-[#64748B] font-medium">Ward</span>
-                  <span className="font-bold text-[#0F172A] truncate max-w-[140px]" title="Cardiology Clinical Ward 4B">
-                    Cardiology Ward 4B
+                  <span className="text-[#64748B] font-medium">{t('dashboard.cards.ward')}</span>
+                  <span className="font-bold text-[#0F172A] truncate max-w-[140px]" title={t('dashboard.cards.wardName')}>
+                    {t('dashboard.cards.wardName')}
                   </span>
                 </div>
               </div>

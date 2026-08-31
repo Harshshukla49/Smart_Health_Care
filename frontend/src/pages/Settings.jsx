@@ -713,13 +713,16 @@ export function Settings() {
                     <Globe className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
                     <select
                       value={language || 'en'}
-                      onChange={(e) => setLanguage?.(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                      onChange={(e) => {
+                        const newLang = e.target.value;
+                        setLanguage?.(newLang);
+                        toast.success(`Language updated to ${newLang === 'hi' ? 'हिंदी (Hindi)' : newLang === 'es' ? 'Español (Spanish)' : 'English'}`);
+                      }}
+                      className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-100 cursor-pointer"
                     >
                       <option value="en">English (US)</option>
                       <option value="hi">हिंदी (Hindi)</option>
                       <option value="es">Español (Spanish)</option>
-                      <option value="fr">Français (French)</option>
                     </select>
                   </div>
                 </label>
