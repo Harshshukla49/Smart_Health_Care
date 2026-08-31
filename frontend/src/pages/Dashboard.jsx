@@ -48,6 +48,7 @@ import { Card } from '../components/Card';
 import { Button } from '../components/Button';
 import { Loader } from '../components/Loader';
 import { ECGChart } from '../components/ECGChart';
+import { StatusPill } from '../components/StatusPill';
 import { VitalCard } from '../components/VitalCard';
 import { ClinicalReportSection } from '../components/ClinicalReportSection';
 import { LiveVitalsProvider, useLiveVitals } from '../context/LiveVitalsContext';
@@ -437,6 +438,17 @@ function DashboardBody({ liveVitals }) {
     ? (session?.specialty || 'Chief of Cardiology, Ward 4B')
     : (doctorSpecialty || session?.doctorSpecialty || 'Cardiologist (Ward 4B)');
 
+  // Formatted display confidence: handle both 0.8402 (decimal) and 84.02 / 96 (integer/percentage)
+  const displayConfidence = useMemo(() => {
+    if (confidence === undefined || confidence === null || confidence === '') return '96.4%';
+    const num = Number(confidence);
+    if (isNaN(num)) return String(confidence);
+    if (num > 0 && num <= 1) {
+      return `${(num * 100).toFixed(1)}%`;
+    }
+    return `${num.toFixed(1)}%`;
+  }, [confidence]);
+
   const handleOpenVideoDialer = () => {
     if (isDoctor) {
       const targetPt = selectedPatient || (doctorPatients.length > 0 ? doctorPatients[0] : null);
@@ -546,86 +558,127 @@ function DashboardBody({ liveVitals }) {
               </div>
             </div>
 
-            {/* Summary Stat Cards (4 Cards) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              <Card className="p-4 sm:p-5 bg-white border border-[#E2E8F0] shadow-[0_4px_18px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-all">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
+            {/* Summary Stat Cards (4 Cards) - Premium Medical SaaS Redesign */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Card 1: Monitoring State */}
+              <div className="group relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
                       Monitoring State
-                    </p>
-                    <p className="mt-1.5 font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
+                    </span>
+                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-sky-50 text-[#0284C7] border border-sky-100 group-hover:scale-105 transition-transform">
+                      <Activity className="h-4 w-4" />
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 flex items-baseline gap-2.5">
+                    <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
                       {healthStatusLabel}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-[#64748B]">
-                      Confidence: {confidence !== undefined ? `${confidence}%` : '96.4%'}
-                    </p>
+                    </h3>
+                    <StatusPill status={healthStatusLabel} size="sm" pulse={isHighRisk} />
                   </div>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-sky-200 bg-sky-50 text-[#0284C7] shadow-2xs">
-                    <Activity className="h-5 w-5" />
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-[#64748B] font-medium">Confidence</span>
+                  <span className="font-bold text-[#0F172A] bg-slate-100 px-2 py-0.5 rounded-md font-mono text-[11px]">
+                    {displayConfidence}
                   </span>
                 </div>
-              </Card>
+              </div>
 
-              <Card className="p-4 sm:p-5 bg-white border border-[#E2E8F0] shadow-[0_4px_18px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-all">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
+              {/* Card 2: Signal Freshness */}
+              <div className="group relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
                       Signal Freshness
-                    </p>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <span className="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse" />
-                      <p className="font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
-                        Live stream
-                      </p>
-                    </div>
-                    <p className="mt-1 text-xs font-medium text-[#64748B]">
-                      Telemetry: 350ms sync
-                    </p>
+                    </span>
+                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-teal-50 text-[#0D9488] border border-teal-100 group-hover:scale-105 transition-transform">
+                      <Waves className="h-4 w-4" />
+                    </span>
                   </div>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-[#0D9488] shadow-2xs">
-                    <Waves className="h-5 w-5" />
+
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+                    </span>
+                    <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
+                      Live Stream
+                    </h3>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-[#64748B] font-medium">Latency</span>
+                  <span className="font-bold text-emerald-700 bg-emerald-50 border border-emerald-200/80 px-2 py-0.5 rounded-md font-mono text-[11px]">
+                    ● 350ms sync
                   </span>
                 </div>
-              </Card>
+              </div>
 
-              <Card className="p-4 sm:p-5 bg-white border border-[#E2E8F0] shadow-[0_4px_18px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-all">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
+              {/* Card 3: Emergency Readiness */}
+              <div className="group relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
                       Emergency Readiness
-                    </p>
-                    <p className="mt-1.5 font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
-                      {emergency?.locationStatus === 'active' ? 'GPS Locked' : 'Standby'}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-[#64748B]">
-                      Ambulance API active
-                    </p>
+                    </span>
+                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-indigo-600 border border-indigo-100 group-hover:scale-105 transition-transform">
+                      <ShieldCheck className="h-4 w-4" />
+                    </span>
                   </div>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-600 shadow-2xs">
-                    <ShieldCheck className="h-5 w-5" />
-                  </span>
-                </div>
-              </Card>
 
-              <Card className="p-4 sm:p-5 bg-white border border-[#E2E8F0] shadow-[0_4px_18px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.07)] transition-all">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
-                      Doctor Scope
-                    </p>
-                    <p className="mt-1.5 font-sans text-xl sm:text-2xl font-extrabold text-[#0F172A]">
-                      {role === 'doctor' ? `${patientCount} Patient${patientCount === 1 ? '' : 's'}` : '1 Patient'}
-                    </p>
-                    <p className="mt-1 text-xs font-medium text-[#64748B]">
-                      Cardiology Clinical Ward
-                    </p>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
+                      {emergency?.locationStatus === 'active' ? 'GPS Locked' : 'Standby'}
+                    </h3>
+                    {emergency?.locationStatus === 'active' && (
+                      <span className="rounded-full bg-indigo-50 border border-indigo-200 px-2 py-0.5 text-[10px] font-bold text-indigo-700">
+                        Ready
+                      </span>
+                    )}
                   </div>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-violet-200 bg-violet-50 text-violet-600 shadow-2xs">
-                    <Users className="h-5 w-5" />
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-[#64748B] font-medium">Ambulance SOS</span>
+                  <span className="font-semibold text-[#0F172A] flex items-center gap-1">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                    Active API
                   </span>
                 </div>
-              </Card>
+              </div>
+
+              {/* Card 4: Doctor Scope */}
+              <div className="group relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-5 shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_28px_rgba(15,23,42,0.08)] hover:-translate-y-0.5 transition-all duration-200 flex flex-col justify-between">
+                <div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.14em] text-[#94A3B8]">
+                      {isDoctor ? 'Assigned Roster' : 'Doctor Scope'}
+                    </span>
+                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-50 text-violet-600 border border-violet-100 group-hover:scale-105 transition-transform">
+                      <Users className="h-4 w-4" />
+                    </span>
+                  </div>
+
+                  <div className="mt-2.5 flex items-baseline gap-2">
+                    <h3 className="font-sans text-2xl font-extrabold text-[#0F172A] tracking-tight">
+                      {role === 'doctor' ? `${patientCount} Patient${patientCount === 1 ? '' : 's'}` : '1 Patient'}
+                    </h3>
+                    <span className="text-xs text-[#64748B] font-medium">active</span>
+                  </div>
+                </div>
+
+                <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-xs">
+                  <span className="text-[#64748B] font-medium">Ward</span>
+                  <span className="font-bold text-[#0F172A] truncate max-w-[140px]" title="Cardiology Clinical Ward 4B">
+                    Cardiology Ward 4B
+                  </span>
+                </div>
+              </div>
             </div>
           </section>
 
