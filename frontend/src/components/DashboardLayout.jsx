@@ -65,7 +65,7 @@ export function DashboardLayout({
 
         <div className="min-w-0 flex-1 space-y-4 sm:space-y-5 lg:space-y-6">
           {/* Top Clinical Floating Header Bar */}
-          <header className="rounded-[16px] border border-[#E2E8F0] bg-white px-4 py-2.5 sm:px-6 shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+          <header className="rounded-[18px] border border-[#E2E8F0] bg-white px-4 py-3 sm:px-6 shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
             <div className="flex flex-wrap items-center justify-between gap-3">
               {/* Left Actions */}
               <div className="flex flex-wrap items-center gap-2.5 sm:gap-3">

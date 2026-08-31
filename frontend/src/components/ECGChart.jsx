@@ -27,35 +27,35 @@ export function ECGChart({ ecgData = [], heartRate = 72 }) {
   }, [ecgData]);
 
   return (
-    <Card className="h-full p-4 sm:p-5 bg-white border border-slate-200/80 shadow-[0_2px_12px_rgba(15,23,42,0.03)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all">
+    <Card className="h-full p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[18px] shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_26px_rgba(15,23,42,0.07)] transition-all">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
-            <h3 className="font-sans text-lg font-bold text-slate-900">Live ECG</h3>
+            <h3 className="font-sans text-lg font-bold text-[#0F172A]">Live ECG Rhythm</h3>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Signal stable
             </span>
           </div>
-          <p className="mt-0.5 text-xs text-slate-500">Continuous telemetry rhythm strip</p>
+          <p className="mt-0.5 text-xs text-[#64748B]">Continuous telemetry waveform strip (250 Hz)</p>
         </div>
 
         {/* Clinical parameters badge bar */}
         <div className="flex flex-wrap items-center gap-1.5 text-[11px] font-medium">
-          <span className="rounded-lg border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
-            Lead: <strong className="text-slate-900 font-semibold">Lead II</strong>
+          <span className="rounded-lg border border-[#E2E8F0] bg-slate-50 px-2.5 py-1 text-[#334155] font-semibold">
+            Lead: <strong className="text-[#0F172A]">Lead II</strong>
           </span>
-          <span className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-0.5 text-rose-700">
-            HR: <strong className="font-semibold">{heartRate || 72} BPM</strong>
+          <span className="rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-rose-700 font-semibold">
+            HR: <strong className="font-bold">{heartRate || 72} BPM</strong>
           </span>
-          <span className="rounded-lg border border-teal-200 bg-teal-50 px-2 py-0.5 text-teal-700">
-            Quality: <strong className="font-semibold">98%</strong>
+          <span className="rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-teal-700 font-semibold">
+            Quality: <strong className="font-bold">98%</strong>
           </span>
         </div>
       </div>
 
       {/* Medical ECG grid background */}
-      <div className="mt-4 h-[210px] rounded-xl border border-slate-200 ecg-grid-background p-2.5 relative overflow-hidden">
+      <div className="mt-4 h-[210px] rounded-xl border border-[#E2E8F0] ecg-grid-background p-2.5 relative overflow-hidden">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
             <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" vertical={false} />

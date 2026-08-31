@@ -498,21 +498,23 @@ function DashboardBody({ liveVitals }) {
               1. OVERVIEW SECTION: Unified Live Dashboard (id="overview")
              ======================================================= */}
           <section id="overview" className="scroll-mt-24 space-y-4">
-            <div className="relative overflow-hidden rounded-[16px] border border-[#E2E8F0] bg-white p-6 sm:p-7 shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+            <div className="relative overflow-hidden rounded-[18px] border border-[#E2E8F0] bg-white p-6 sm:p-7 shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
               <div className="pointer-events-none absolute -right-16 -top-16 h-80 w-80 rounded-full bg-sky-100/40 blur-3xl" />
               <div className="pointer-events-none absolute -right-8 -bottom-12 h-64 w-64 rounded-full bg-teal-100/30 blur-2xl" />
 
               <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-6">
                 <div className="max-w-2xl">
-                  <div className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-[#0284C7]">
-                    <Activity className="h-3.5 w-3.5 text-[#0284C7]" />
-                    <span>Clinical Telemetry Center</span>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-[#0284C7]">
+                    <span className="h-2 w-2 rounded-full bg-sky-500 animate-pulse" />
+                    <span>{isDoctor ? 'Clinical Command Ward' : 'Personal Health Workspace'}</span>
                   </div>
                   <h1 className="mt-3 font-sans text-2xl sm:text-3xl lg:text-[32px] font-extrabold tracking-tight text-[#0F172A]">
-                    Unified Live Dashboard
+                    Welcome back, {session?.name || (isDoctor ? 'Doctor' : 'Akash')}
                   </h1>
                   <p className="mt-2 text-sm sm:text-base leading-relaxed text-[#64748B]">
-                    Real-time heart rate, SpO2, temperature, and ECG waveform in one monitoring workspace.
+                    {isDoctor
+                      ? 'Continuous telemetry stream and clinical risk overview across your active ward roster.'
+                      : 'Your vital signs, heart rhythm telemetry, and AI health assessment are monitored in real time.'}
                   </p>
                 </div>
 
@@ -1057,18 +1059,18 @@ function DashboardBody({ liveVitals }) {
             </div>
 
             {isDoctor ? (
-              <Card className="p-0 overflow-hidden bg-white border border-[#E2E8F0] rounded-[16px] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
+              <Card className="p-0 overflow-hidden bg-white border border-[#E2E8F0] rounded-[18px] shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs sm:text-sm">
-                    <thead className="border-b border-[#E2E8F0] bg-slate-50/80 text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">
+                    <thead className="border-b border-[#E2E8F0] bg-slate-50/80 text-[10px] font-bold uppercase tracking-[0.16em] text-[#94A3B8]">
                       <tr>
-                        <th className="px-5 py-3.5">Patient</th>
-                        <th className="px-5 py-3.5">ID</th>
-                        <th className="px-5 py-3.5">Heart Rate</th>
-                        <th className="px-5 py-3.5">SpO2</th>
-                        <th className="px-5 py-3.5">Temperature</th>
-                        <th className="px-5 py-3.5">Status</th>
-                        <th className="px-5 py-3.5 text-right">Action</th>
+                        <th className="px-5 py-4">Patient</th>
+                        <th className="px-5 py-4">ID</th>
+                        <th className="px-5 py-4">Heart Rate</th>
+                        <th className="px-5 py-4">SpO2</th>
+                        <th className="px-5 py-4">Temperature</th>
+                        <th className="px-5 py-4">Status</th>
+                        <th className="px-5 py-4 text-right">Actions</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">
@@ -1076,21 +1078,33 @@ function DashboardBody({ liveVitals }) {
                         doctorPatients.map((pt) => {
                           const isCritical = Number(pt?.spo2 || 0) > 0 && Number(pt?.spo2 || 0) < 90;
                           const isSelected = String(currentPatientId).toLowerCase() === String(pt.id).toLowerCase();
+                          const ptInitials = (pt.name || 'PT')
+                            .split(' ')
+                            .map((w) => w[0])
+                            .join('')
+                            .slice(0, 2)
+                            .toUpperCase();
+
                           return (
                             <tr
                               key={pt.id}
                               onClick={() => setSelectedPatientId(pt.id)}
-                              className={`cursor-pointer transition-colors ${
-                                isSelected
+                              className={`cursor-pointer transition-all duration-150 ${
+                                isCritical
+                                  ? 'bg-rose-50/30 border-l-4 border-l-rose-500'
+                                  : isSelected
                                   ? 'bg-sky-50/80 border-l-4 border-l-[#0284C7]'
-                                  : 'hover:bg-slate-50/60'
+                                  : 'hover:bg-slate-50/70'
                               }`}
                             >
                               <td className="px-5 py-3.5">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-3">
+                                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 font-bold text-xs border border-slate-200">
+                                    {ptInitials}
+                                  </div>
                                   <div className="min-w-0">
-                                    <p className="font-bold text-[#0F172A] truncate">{pt.name || 'Unnamed Patient'}</p>
-                                    <p className="text-[11px] text-[#64748B]">
+                                    <p className="font-bold text-[#0F172A] truncate leading-tight">{pt.name || 'Unnamed Patient'}</p>
+                                    <p className="text-[11px] text-[#64748B] mt-0.5">
                                       {pt.age || 24} yrs · {pt.gender || 'Male'}
                                     </p>
                                   </div>
@@ -1102,19 +1116,34 @@ function DashboardBody({ liveVitals }) {
                                 </div>
                               </td>
                               <td className="px-5 py-3.5 text-[#64748B] font-mono text-xs">{pt.id}</td>
-                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.heartRate || 72} BPM</td>
-                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.spo2 || 98}%</td>
-                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">{pt.temperature || 36.7}°C</td>
+                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">
+                                <span className="flex items-center gap-1.5">
+                                  <HeartPulse className="h-3.5 w-3.5 text-rose-500" />
+                                  {pt.heartRate || 72} BPM
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">
+                                <span className="flex items-center gap-1.5">
+                                  <Waves className="h-3.5 w-3.5 text-teal-500" />
+                                  {pt.spo2 || 98}%
+                                </span>
+                              </td>
+                              <td className="px-5 py-3.5 font-semibold text-[#0F172A]">
+                                <span className="flex items-center gap-1.5">
+                                  <Thermometer className="h-3.5 w-3.5 text-amber-500" />
+                                  {pt.temperature || 36.7}°C
+                                </span>
+                              </td>
                               <td className="px-5 py-3.5">
                                 <span
-                                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold ${
+                                  className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[10px] font-bold ${
                                     isCritical
                                       ? 'border-rose-200 bg-rose-50 text-rose-700'
                                       : 'border-emerald-200 bg-emerald-50 text-emerald-700'
                                   }`}
                                 >
-                                  <span className={`h-1.5 w-1.5 rounded-full ${isCritical ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                                  {isCritical ? 'Attention' : (pt.heartRate && pt.spo2 ? 'Monitoring' : 'Stable')}
+                                  <span className={`h-1.5 w-1.5 rounded-full ${isCritical ? 'bg-rose-500 animate-ping' : 'bg-emerald-500'}`} />
+                                  {isCritical ? 'Critical' : (pt.heartRate && pt.spo2 ? 'Monitoring' : 'Stable')}
                                 </span>
                               </td>
                               <td className="px-5 py-3.5 text-right">
@@ -1195,57 +1224,119 @@ function DashboardBody({ liveVitals }) {
                 </div>
               </Card>
             ) : (
-              <Card className="p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[16px] shadow-[0_4px_18px_rgba(15,23,42,0.04)]">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div className="rounded-[14px] border border-[#E2E8F0] p-4 bg-slate-50/50">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Primary Physician</p>
-                    <div className="mt-2 flex items-center gap-3">
-                      <img
-                        src="/assets/doctor-command-center.png"
-                        alt={attendingDoctorName}
-                        className="h-11 w-11 rounded-xl object-cover border border-slate-200 shadow-2xs shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm sm:text-base font-bold text-[#0F172A] leading-tight truncate">{attendingDoctorName}</p>
-                        <p className="text-xs text-[#64748B] mt-0.5">{attendingDoctorSpecialty}</p>
-                      </div>
-                    </div>
-                    <div className="mt-3 space-y-1 text-xs text-[#64748B]">
-                      <p className="flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-slate-400" /> {attendingDoctorEmail}</p>
-                      <p className="flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-slate-400" /> {attendingDoctorPhone}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[14px] border border-[#E2E8F0] p-4 bg-slate-50/50">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Active Patient Record</p>
-                    <div className="mt-2 flex items-center gap-3">
-                      <img
-                        src="/assets/patient-remote-care.png"
-                        alt="Patient Remote Telemetry"
-                        className="h-11 w-11 rounded-xl object-cover border border-slate-200 shadow-2xs shrink-0"
-                      />
-                      <div className="min-w-0">
-                        <p className="text-sm sm:text-base font-bold text-[#0F172A] leading-tight truncate">{currentPatientName}</p>
-                        <p className="text-xs text-[#64748B] mt-0.5">ID: {currentPatientId} · Male, 24y</p>
-                      </div>
-                    </div>
-                    <div className="mt-3 space-y-1 text-xs text-[#64748B]">
-                      <p className="flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-slate-400" /> Delhi, India</p>
-                      <p className="flex items-center gap-1.5"><HeartPulse className="h-3.5 w-3.5 text-[#0284C7]" /> Telemetry Active</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[14px] border border-[#E2E8F0] p-4 bg-slate-50/50 flex flex-col justify-between">
+              <Card className="p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[18px] shadow-[0_4px_20px_rgba(15,23,42,0.04)]">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 lg:gap-5">
+                  {/* Card 1: Premium Patient Identity Card */}
+                  <div className="rounded-[16px] border border-[#E2E8F0] p-5 bg-white shadow-2xs flex flex-col justify-between">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-[#94A3B8]">Direct Consultation</p>
-                      <p className="text-xs text-[#64748B] mt-1.5 leading-relaxed">
-                        Need immediate medical consultation with your attending doctor? Start an encrypted video or chat session.
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-[#0284C7] to-blue-700 text-white font-extrabold text-base shadow-xs border-2 border-white ring-1 ring-sky-100">
+                            {(currentPatientName || 'Akash Soni')
+                              .split(' ')
+                              .map((n) => n[0])
+                              .join('')
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-sans text-base font-bold text-[#0F172A] leading-tight truncate">
+                              {currentPatientName || 'Akash Soni'}
+                            </h4>
+                            <p className="text-xs text-[#64748B] font-mono mt-0.5">
+                              ID: {currentPatientId || 'P-1024'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Stable
+                        </span>
+                      </div>
+
+                      <div className="mt-4 pt-3.5 border-t border-slate-100 grid grid-cols-2 gap-3 text-xs">
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Age</p>
+                          <p className="font-bold text-[#0F172A] mt-0.5">{patientAge || 24} yrs</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Blood Group</p>
+                          <p className="font-bold text-[#0F172A] mt-0.5">O+ Positive</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Attending</p>
+                          <p className="font-semibold text-[#0F172A] mt-0.5 truncate">{attendingDoctorName || 'Dr. Abhishek Rai'}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Last Check</p>
+                          <p className="font-semibold text-[#64748B] mt-0.5">Just now</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 2: Assigned Doctor Identity Card */}
+                  <div className="rounded-[16px] border border-[#E2E8F0] p-5 bg-white shadow-2xs flex flex-col justify-between">
+                    <div>
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="grid h-12 w-12 place-items-center rounded-2xl bg-teal-50 border border-teal-200 text-[#0D9488] font-black text-base shadow-xs">
+                            {(attendingDoctorName || 'Dr. Abhishek Rai')
+                              .replace('Dr.', '')
+                              .trim()
+                              .split(' ')
+                              .map((n) => n[0])
+                              .join('')
+                              .slice(0, 2)
+                              .toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <h4 className="font-sans text-base font-bold text-[#0F172A] leading-tight truncate">
+                              {attendingDoctorName || 'Dr. Abhishek Rai'}
+                            </h4>
+                            <p className="text-xs font-medium text-[#0D9488] mt-0.5">
+                              {attendingDoctorSpecialty || 'Consultant Cardiologist'}
+                            </p>
+                          </div>
+                        </div>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Online
+                        </span>
+                      </div>
+
+                      <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-1.5 text-xs text-[#64748B]">
+                        <p className="flex items-center gap-2">
+                          <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span className="truncate">{attendingDoctorEmail || 'cardiology@hospital.org'}</span>
+                        </p>
+                        <p className="flex items-center gap-2">
+                          <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <span>{attendingDoctorPhone || '+91 98765 43210'}</span>
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Card 3: Direct Telehealth Video Consultation Action Card */}
+                  <div className="rounded-[16px] border border-sky-200 bg-gradient-to-br from-sky-50/70 to-blue-50/50 p-5 shadow-2xs flex flex-col justify-between">
+                    <div>
+                      <div className="inline-flex items-center gap-1.5 rounded-full bg-sky-100 border border-sky-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0284C7]">
+                        <Video className="h-3 w-3" />
+                        <span>Instant Consultation</span>
+                      </div>
+                      <h4 className="font-sans text-base font-bold text-[#0F172A] mt-2.5">
+                        Encrypted Video Call
+                      </h4>
+                      <p className="text-xs text-[#64748B] mt-1 leading-relaxed">
+                        Initiate high-definition, WebRTC peer-to-peer telehealth consultation with your assigned physician.
                       </p>
                     </div>
+
                     <button
                       type="button"
                       onClick={handleOpenVideoDialer}
-                      className="mt-3 inline-flex items-center justify-center gap-1.5 rounded-[10px] bg-[#0284C7] px-4 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-[#0369A1] transition"
+                      className="mt-4 w-full inline-flex items-center justify-center gap-2 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-[0_4px_14px_rgba(2,132,199,0.3)] hover:shadow-[0_6px_20px_rgba(2,132,199,0.4)] transition-all duration-200 hover:-translate-y-0.5 active:translate-y-0 active:scale-[0.98]"
                     >
                       <Video className="h-4 w-4" />
                       <span>Start Video Consultation</span>

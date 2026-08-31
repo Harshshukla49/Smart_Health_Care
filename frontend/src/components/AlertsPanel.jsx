@@ -105,19 +105,19 @@ export function AlertsPanel({ alerts = [] }) {
   return (
     <Card
       id="alerts"
-      className="p-5 sm:p-6 bg-white border border-slate-200/80 shadow-[0_2px_12px_rgba(15,23,42,0.03)] hover:shadow-[0_8px_24px_rgba(15,23,42,0.06)] transition-all"
+      className="p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[18px] shadow-[0_4px_20px_rgba(15,23,42,0.04)] hover:shadow-[0_8px_26px_rgba(15,23,42,0.07)] transition-all"
     >
       {/* Panel Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-100">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-xl bg-sky-50 border border-sky-200 text-sky-600 shadow-2xs">
+          <span className="grid h-8 w-8 place-items-center rounded-xl bg-sky-50 border border-sky-200 text-[#0284C7] shadow-2xs">
             <Bell className="h-4 w-4" />
           </span>
           <div>
-            <h3 className="font-sans text-base sm:text-lg font-bold text-slate-900 leading-tight">
+            <h3 className="font-sans text-base sm:text-lg font-bold text-[#0F172A] leading-tight">
               Clinical Alerts & Notifications
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-[#64748B] mt-0.5">
               Real-time physiological threshold monitoring
             </p>
           </div>

@@ -175,24 +175,24 @@ export function AiHealthAssessment({
       )}
 
       {/* Main AI Health Assessment Card */}
-      <div className={`rounded-2xl border p-5 sm:p-6 transition-all ${currentTheme.border}`}>
+      <div className={`rounded-[18px] border bg-white shadow-[0_4px_20px_rgba(15,23,42,0.04)] p-5 sm:p-6 transition-all duration-200 ${currentTheme.border}`}>
         {/* Header with status pill and actions */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200/50 dark:border-white/10 pb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div className="flex items-center gap-3">
-            <div className="rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 p-2.5 text-white shadow-md">
+            <div className="rounded-xl bg-gradient-to-tr from-sky-500 to-[#0284C7] p-2.5 text-white shadow-xs">
               <BrainCircuit className="h-5 w-5" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                  AI Health Assessment
+                <h3 className="font-sans text-base sm:text-lg font-bold text-[#0F172A]">
+                  AI Health Intelligence
                 </h3>
-                <span className="rounded-full bg-blue-500/10 px-2 py-0.5 text-[10px] font-semibold text-blue-600 dark:text-blue-300">
-                  Clinical Decision Support
+                <span className="rounded-full bg-sky-50 border border-sky-200 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0284C7]">
+                  Clinical AI Engine
                 </span>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">
-                Continuously evaluated from multi-parameter telemetry streams
+              <p className="text-xs text-[#64748B] mt-0.5">
+                Real-time physiological risk triage based on telemetry streams
               </p>
             </div>
           </div>
@@ -207,7 +207,7 @@ export function AiHealthAssessment({
               onClick={fetchAssessment}
               disabled={loading}
               title="Refresh Assessment"
-              className="rounded-lg border border-slate-200 dark:border-white/10 p-1.5 text-slate-500 hover:bg-slate-100 dark:hover:bg-white/10 transition disabled:opacity-50"
+              className="rounded-lg border border-[#E2E8F0] p-1.5 text-slate-500 hover:bg-slate-50 transition disabled:opacity-50"
             >
               <RotateCcw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
             </button>

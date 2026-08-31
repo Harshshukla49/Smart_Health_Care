@@ -3,21 +3,21 @@ import { motion } from 'framer-motion';
 
 const variantStyles = {
   primary:
-    'btn btn-primary',
+    'bg-[#0284C7] hover:bg-[#0369A1] text-white shadow-[0_2px_10px_rgba(2,132,199,0.25)] hover:shadow-[0_4px_16px_rgba(2,132,199,0.35)]',
   secondary:
-    'btn btn-secondary',
+    'border border-[#CBD5E1] bg-white text-[#0F172A] hover:bg-slate-50 hover:border-slate-300 shadow-2xs',
   accent:
-    'btn btn-accent',
+    'bg-[#0D9488] hover:bg-[#0F766E] text-white shadow-[0_2px_10px_rgba(13,148,136,0.25)]',
   danger:
-    'btn btn-danger',
+    'bg-[#E11D48] hover:bg-[#BE123C] text-white shadow-[0_2px_10px_rgba(225,29,72,0.25)]',
   ghost:
-    'btn btn-ghost',
+    'text-slate-600 hover:text-slate-900 hover:bg-slate-100/80',
 };
 
 const sizeStyles = {
-  sm: 'btn-sm',
-  md: 'px-5 py-3 text-sm',
-  lg: 'btn-lg',
+  sm: 'px-3 py-1.5 text-xs',
+  md: 'px-4 sm:px-5 py-2.5 text-xs sm:text-sm',
+  lg: 'px-6 py-3 text-sm sm:text-base font-bold',
 };
 
 export function Button({ as: Component = 'button', variant = 'primary', size = 'md', className = '', children, onClick, ...props }) {

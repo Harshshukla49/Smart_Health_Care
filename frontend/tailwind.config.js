@@ -20,6 +20,10 @@ export default {
         sans: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
         display: ['Inter', 'Manrope', 'Segoe UI', 'ui-sans-serif', 'system-ui', 'sans-serif'],
       },
+      borderRadius: {
+        'card': '18px',
+        'card-lg': '22px',
+      },
       colors: {
         ink: '#0f172a',
         panel: '#ffffff',
@@ -42,25 +46,32 @@ export default {
         glass: '0 4px 20px rgba(15, 23, 42, 0.04)',
         medical: '0 4px 20px rgba(15, 23, 42, 0.04)',
         'medical-hover': '0 10px 30px rgba(15, 23, 42, 0.07)',
+        'card-soft': '0 2px 14px rgba(15, 23, 42, 0.04)',
+        'card-hover': '0 8px 26px rgba(15, 23, 42, 0.08)',
       },
       keyframes: {
         fadeUp: {
-          '0%': { opacity: 0, transform: 'translateY(16px)' },
-          '100%': { opacity: 1, transform: 'translateY(0)' },
+          '0%': { opacity: '0', transform: 'translateY(14px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         slideIn: {
-          '0%': { opacity: 0, transform: 'translateX(-18px)' },
-          '100%': { opacity: 1, transform: 'translateX(0)' },
+          '0%': { opacity: '0', transform: 'translateX(-14px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
         },
-        float: {
-          '0%, 100%': { transform: 'translateY(0px)' },
-          '50%': { transform: 'translateY(-10px)' },
+        shimmer: {
+          '0%': { backgroundPosition: '-200% 0' },
+          '100%': { backgroundPosition: '200% 0' },
+        },
+        subtlePulse: {
+          '0%, 100%': { opacity: '1', transform: 'scale(1)' },
+          '50%': { opacity: '0.85', transform: 'scale(1.04)' },
         },
       },
       animation: {
-        fadeUp: 'fadeUp 0.6s ease-out both',
-        slideIn: 'slideIn 0.45s ease-out both',
-        float: 'float 7s ease-in-out infinite',
+        fadeUp: 'fadeUp 0.4s ease-out both',
+        slideIn: 'slideIn 0.35s ease-out both',
+        shimmer: 'shimmer 2s infinite linear',
+        'subtle-pulse': 'subtlePulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       },
     },
   },
