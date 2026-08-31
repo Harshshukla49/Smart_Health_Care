@@ -3917,8 +3917,10 @@ def get_patient_vitals(patient_id):
 @app.route('/health', methods=['GET'])
 def health():
     payload = {
-        "status": "success" if vitals_model is not None else "warning",
-        "service": "flask-health-backend",
+        "status": "ok",
+        "service": "smart-health-care",
+        "backend": "flask-socketio",
+        "modelStatus": "ready" if vitals_model is not None else "missing",
         "model": "ready" if vitals_model is not None else "missing",
         "modelPath": str(VITAL_MODEL_PATH.resolve()),
         "featureCount": len(VITAL_FEATURE_COLUMNS),
@@ -3927,8 +3929,7 @@ def health():
     }
 
     if vitals_model is None:
-        payload["error"] = "Vitals model is not loaded. Train it first with: venv\\Scripts\\python.exe model.py"
-        return jsonify(payload), 503
+        payload["warning"] = "Vitals model not loaded yet."
 
     return jsonify(payload), 200
 
@@ -4514,8 +4515,14 @@ def _register_socket_user(sid, actor):
 def on_socket_connect(auth):
     actor = _chat_resolve_socket_actor(auth)
     sid = str(request.sid)
+    transport = 'websocket' if request.environ.get('HTTP_UPGRADE', '').lower() == 'websocket' or request.environ.get('wsgi.websocket') else 'polling'
     if actor:
         _register_socket_user(sid, actor)
+        role = actor.get('role', 'unknown')
+        actor_id = actor.get('id', 'unknown')
+        print(f"[Socket.IO] Client connected: sid={sid[:8]}... role={role} id={actor_id} transport={transport}")
+    else:
+        print(f"[Socket.IO] Anonymous client connected: sid={sid[:8]}... transport={transport}")
     return True
 
 
@@ -4524,11 +4531,13 @@ def on_socket_disconnect(*args, **kwargs):
     sid = str(request.sid)
     context = chat_sid_context.pop(sid, None)
     if not isinstance(context, dict):
+        print(f"[Socket.IO] Client disconnected: sid={sid[:8]}...")
         return
 
     user_key = str(context.get('userKey') or '')
     role = str(context.get('role') or '').strip().lower()
     actor_id = str(context.get('id') or '').strip()
+    print(f"[Socket.IO] Client disconnected: sid={sid[:8]}... role={role} id={actor_id}")
 
     # Clean up all keys containing this sid
     keys_to_clean = [user_key, f"{role}:{actor_id.lower()}"]

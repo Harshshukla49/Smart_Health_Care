@@ -11,6 +11,9 @@ const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
+    { urls: 'stun:stun4.l.google.com:19302' },
     ...(import.meta.env.VITE_TURN_SERVER
       ? [
           {
@@ -262,13 +265,19 @@ export function VideoCallProvider({ children }) {
       }
     };
 
-    pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'connected') {
+    const updateConnectedStatus = () => {
+      const connState = pc.connectionState;
+      const iceState = pc.iceConnectionState;
+      if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
         setCallState('connected');
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-        console.warn('[WEBRTC] Connection state changed:', pc.connectionState);
+      } else if (connState === 'failed' || iceState === 'failed') {
+        console.warn('[WEBRTC] Connection failed:', { connState, iceState });
+        toast.error('Video link connection unstable or failed. Retrying...');
       }
     };
+
+    pc.onconnectionstatechange = updateConnectedStatus;
+    pc.oniceconnectionstatechange = updateConnectedStatus;
 
     // Add local tracks to peer connection
     if (localStreamRef.current) {
@@ -405,7 +414,7 @@ export function VideoCallProvider({ children }) {
         });
 
         playConnectChime();
-        setCallState('connected');
+        setCallState('connecting');
       } catch (err) {
         console.error('[WEBRTC] Failed to process offer:', err);
       }
@@ -423,8 +432,11 @@ export function VideoCallProvider({ children }) {
             const cand = iceCandidateQueueRef.current.shift();
             await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
           }
-
-          setCallState('connected');
+          // When ICE finishes, onconnectionstatechange will set 'connected'
+          const connState = pc.connectionState;
+          if (connState === 'connected') {
+            setCallState('connected');
+          }
         } catch (err) {
           console.error('[WEBRTC] Failed to set remote description:', err);
         }
