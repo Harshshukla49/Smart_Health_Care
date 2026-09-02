@@ -163,11 +163,20 @@ export function PatientDetails() {
       return;
     }
 
+    const session = getAuthSession();
+    const token = session?.token;
+
     const socket = io(SOCKET_BASE_URL, {
       transports: ['websocket', 'polling'],
+      auth: {
+        token: token,
+        role: session?.role,
+        patientId: session?.patientId,
+        doctorId: session?.doctorId,
+      },
     });
 
-    socket.emit('subscribe_patient', { patientId });
+    socket.emit('subscribe_patient', { patientId, token });
 
     socket.on('patient_snapshot', (payload) => {
       const snapshot = payload?.data;

@@ -163,6 +163,8 @@ import smtplib
 import secrets
 import string
 import time
+import hashlib
+import hmac
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
@@ -1919,11 +1921,46 @@ def _decode_auth_token(token):
     if not token_value:
         return {}
 
+    # 1. Cryptographically verify application auth_serializer signature and expiration
     try:
         payload = auth_serializer.loads(token_value, max_age=AUTH_TOKEN_TTL_SECONDS)
-        return payload if isinstance(payload, dict) else {}
+        if isinstance(payload, dict) and payload.get('role'):
+            return payload
     except (BadSignature, SignatureExpired):
-        return {}
+        pass
+    except Exception:
+        pass
+
+    # 2. Cryptographically verify Firebase Admin ID token (signature, expiration, audience)
+    try:
+        decoded_fb = firebase_auth.verify_id_token(token_value)
+        if isinstance(decoded_fb, dict):
+            email = str(decoded_fb.get('email') or '').strip().lower()
+            uid = str(decoded_fb.get('uid') or '').strip()
+            role = str(decoded_fb.get('role') or '').strip().lower()
+
+            if not role:
+                # Resolve role from Firebase Realtime Database registration
+                if _patient_collection_reference().child(uid).get():
+                    role = 'patient'
+                elif _doctor_collection_reference().child(email.replace('.', ',')).get():
+                    role = 'doctor'
+                else:
+                    role = 'patient'
+
+            return {
+                'role': role,
+                'email': email,
+                'uid': uid,
+                'patientId': uid if role == 'patient' else '',
+                'doctorId': email if role == 'doctor' else '',
+                'name': decoded_fb.get('name') or '',
+                'firebaseAuth': True,
+            }
+    except Exception:
+        pass
+
+    return {}
 
 
 def _chat_threads_reference():
@@ -2047,18 +2084,6 @@ def _chat_resolve_socket_actor(auth_data=None):
                 if auth_data.get('name') and not actor.get('name'):
                     actor['name'] = str(auth_data.get('name')).strip()
                 return actor
-
-        role = str(auth_data.get('role') or '').strip().lower()
-        actor_id = str(auth_data.get('doctorId') or auth_data.get('patientId') or auth_data.get('userId') or auth_data.get('email') or '').strip()
-        if role in ('doctor', 'patient') and actor_id:
-            return {
-                'role': role,
-                'id': actor_id.lower() if role == 'doctor' else actor_id,
-                'doctorId': str(auth_data.get('doctorId') or '').strip(),
-                'email': str(auth_data.get('email') or '').strip().lower(),
-                'patientId': str(auth_data.get('patientId') or '').strip(),
-                'name': str(auth_data.get('name') or '').strip(),
-            }
 
     auth_header = str(request.headers.get('Authorization') or '').strip()
     if auth_header.lower().startswith('bearer '):
@@ -2375,15 +2400,6 @@ def _sync_doctor_contact_in_patients(old_doctor_email, new_doctor_email, new_doc
     return updated
 
 
-def _doctor_owns_record(record, doctor_id):
-    if not doctor_id:
-        return False
-
-    owner_id = str((record or {}).get('doctorId') or '').strip().lower()
-    owner_email = str((record or {}).get('doctorEmail') or '').strip().lower()
-    return bool(owner_id or owner_email) and doctor_id in {owner_id, owner_email}
-
-
 def _generate_patient_id():
     year = datetime.now().year
     collection = _patient_collection_reference()
@@ -2615,13 +2631,19 @@ def _normalize_patient_record(patient_id, payload, existing_record=None):
         },
         'symptoms': payload.get('symptoms') or (existing_record or {}).get('symptoms') or '',
         'heartRate': heart_rate,
+        'heart_rate': heart_rate,
         'spo2': spo2,
         'temperature': temperature,
+        'leadsOff': bool(payload.get('leadsOff', (existing_record or {}).get('leadsOff', False))),
         'vitals': {
             'heartRate': heart_rate,
+            'heart_rate': heart_rate,
             'spo2': spo2,
             'temperature': temperature,
+            'ecg': payload.get('ecg') or (ecg_data[-1] if ecg_data else 0),
             'ecgData': ecg_data,
+            'leadsOff': bool(payload.get('leadsOff', (existing_record or {}).get('leadsOff', False))),
+            'dataSource': payload.get('dataSource') or (existing_record or {}).get('dataSource') or 'dataset',
             'updatedAt': payload.get('updatedAt') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         },
         'ecgData': ecg_data,
@@ -2678,6 +2700,15 @@ def _read_patient_records():
 def _write_patient_record(patient_id, payload):
     reference = _patient_collection_reference().child(patient_id)
     existing = reference.get() or {}
+
+    # TOCTOU Hardware Authority Protection: prevent simulator/background writes from overwriting active hardware telemetry
+    writer_source = str(payload.get('dataSource') or '')
+    if isinstance(existing, dict) and existing.get('dataSource') == 'esp32-hardware':
+        last_hw = _hardware_active_patients.get(str(patient_id).strip(), 0)
+        if (time.time() - last_hw < 60) and writer_source != 'esp32-hardware' and writer_source != 'manual-update':
+            print(f"[PatientRecord] Refusing overwrite of hardware telemetry for patient {patient_id} from source '{writer_source}'.")
+            return existing
+
     record = _normalize_patient_record(patient_id, payload, existing if isinstance(existing, dict) else None)
     reference.set(record)
     return record
@@ -2779,11 +2810,23 @@ def _stream_patient_updates(patient_id):
         if not isinstance(record, dict) or not record.get('deviceConnected'):
             break
 
+        # If real ESP32 hardware is actively streaming for this patient, immediately yield and terminate simulator
+        last_hw = _hardware_active_patients.get(str(patient_id).strip(), 0)
+        if (time.time() - last_hw < 60) or record.get('dataSource') == 'esp32-hardware':
+            print(f"[Simulator] Hardware telemetry active for patient '{patient_id}'. Terminating simulator background loop.")
+            break
+
         normalized = _normalize_patient_record(patient_id, record, record)
         next_vitals = sensor_adapter.get_next_vitals(patient_id, normalized.get('vitals') or {})
         prediction = predict_risk(next_vitals)
 
         with_audit = _append_prediction_audit(dict(normalized), prediction, str(next_vitals.get('source') or 'sensor-stream'), next_vitals)
+
+        # Pre-write check: terminate immediately if real hardware packets arrived during prediction
+        last_hw = _hardware_active_patients.get(str(patient_id).strip(), 0)
+        if (time.time() - last_hw < 60):
+            print(f"[Simulator] Hardware telemetry became active for patient '{patient_id}'. Terminating simulator background loop.")
+            break
 
         updated_record = _write_patient_record(patient_id, {
             **with_audit,
@@ -4008,22 +4051,6 @@ def predict():
         prediction = predict_risk(data)
         prediction['source'] = 'vitals_model.pkl'
         prediction['modelPath'] = str(VITAL_MODEL_PATH.resolve())
-
-        patient_id = str(data.get('patientId') or data.get('patient_id') or '').strip()
-        if patient_id:
-            record = _patient_collection_reference().child(patient_id).get()
-            if isinstance(record, dict):
-                normalized = _normalize_patient_record(patient_id, record, record)
-                with_audit = _append_prediction_audit(dict(normalized), prediction, 'predict-api', prediction.get('features') or {})
-                _write_patient_record(patient_id, {
-                    **with_audit,
-                    'prediction': {
-                        'risk': prediction.get('risk'),
-                        'message': prediction.get('message'),
-                        'status': prediction.get('prediction_status') or prediction.get('risk'),
-                        'confidence': prediction.get('confidence', 0.0),
-                    },
-                })
 
         return jsonify(prediction)
     except ValueError as e:
@@ -5271,119 +5298,534 @@ def on_webrtc_ice_candidate(data):
         _chat_emit_to_user(target_role, target_id, 'webrtc:ice_candidate', candidate_payload)
 
 
-@socketio.on('subscribe_patient')
-def on_subscribe_patient(data):
-    patient_id = str((data or {}).get('patientId') or '').strip()
-    if not patient_id:
-        emit('subscription_error', {'message': 'patientId is required'})
+# ============================================================================
+# 🔐 ESP32 HARDWARE DEVICE REGISTRY & AUTHENTICATION SUBSYSTEM
+# ============================================================================
+
+_hardware_active_patients = {}  # {patient_id: float_last_seen_timestamp}
+
+
+def _devices_collection_reference():
+    return db.reference('devices')
+
+
+def _hash_device_token(token_str):
+    if not token_str:
+        return ""
+    return hashlib.sha256(str(token_str).strip().encode('utf-8')).hexdigest()
+
+
+def _verify_device_credentials(device_id, device_token):
+    device_key = str(device_id or '').strip()
+    raw_token = str(device_token or '').strip()
+    if not device_key or not raw_token:
+        return None, "Device ID and Token are required."
+
+    try:
+        device_record = _devices_collection_reference().child(device_key).get()
+    except Exception as err:
+        return None, f"Device lookup error: {err}"
+
+    if not isinstance(device_record, dict):
+        return None, "Device is not registered in the system."
+
+    if not device_record.get('active', True):
+        return None, "Device has been deactivated."
+
+    stored_hash = str(device_record.get('tokenHash') or '').strip()
+    provided_hash = _hash_device_token(raw_token)
+
+    if not stored_hash or not hmac.compare_digest(stored_hash, provided_hash):
+        return None, "Invalid device authentication token."
+
+    return device_record, None
+
+
+def _evaluate_and_trigger_telemetry_emergency(patient_id, record, vitals, prediction):
+    now = time.time()
+    last_alerts = getattr(app, '_last_telemetry_alert_time', {})
+    if not isinstance(last_alerts, dict):
+        last_alerts = {}
+        app._last_telemetry_alert_time = last_alerts
+
+    if now - last_alerts.get(patient_id, 0) < 300:
         return
+    last_alerts[patient_id] = now
 
-    join_room(_patient_room(patient_id))
-    emit('subscription_ok', {'patientId': patient_id})
-# ================= ESP32 LIVE VITALS API =================
+    now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    alert_id = f"emg-telemetry-{int(now * 1000)}"
+    patient_name = record.get('name') or "Patient"
+    assigned_doc = str(record.get('assignedDoctorId') or record.get('doctorId') or record.get('doctorEmail') or '').strip().lower()
+    trigger_reason = f"ESP32 Telemetry Alert: {prediction.get('message') or 'Critical clinical vitals threshold breached'}"
 
-latest_data = {
-    "heartRate": 0,
-    "spo2": 0,
-    "temperature": 0,
-    "ecg": 0,
-    "leadsOff": True
-}
-
-@app.route("/api/esp32/update", methods=["POST"])
-def esp32_update():
-    global latest_data
-
-    payload = request.get_json(force=True, silent=True) or {}
-
-    heart_rate = float(payload.get("heartRate") if payload.get("heartRate") is not None else payload.get("heart_rate", payload.get("bpm", 0)))
-    spo2 = float(payload.get("spo2") if payload.get("spo2") is not None else payload.get("spO2", payload.get("SpO2", 0)))
-    temperature = float(payload.get("temperature") if payload.get("temperature") is not None else payload.get("temp", payload.get("temperatureC", 0)))
-    ecg = int(payload.get("ecg") if payload.get("ecg") is not None else payload.get("ecgValue", 0))
-    leads_off = bool(payload.get("leadsOff") if payload.get("leadsOff") is not None else payload.get("leadOff", False))
-    patient_id = str(payload.get("patientId") or payload.get("patient_id") or "").strip()
-
-    now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    latest_data = {
-        "heartRate": heart_rate,
-        "spo2": spo2,
-        "temperature": temperature,
-        "ecg": ecg,
-        "leadsOff": leads_off,
+    alert_record = {
+        "alertId": alert_id,
         "patientId": patient_id,
+        "patientName": patient_name,
+        "status": "CRITICAL",
+        "triggerReason": trigger_reason,
+        "vitals": {
+            "heartRate": vitals.get('heart_rate'),
+            "spo2": vitals.get('spo2'),
+            "temperature": vitals.get('temperature'),
+        },
+        "location": record.get('location') or {},
+        "doctorId": assigned_doc or "general-triage",
+        "assignedDoctorId": assigned_doc or "general-triage",
+        "sosContact": record.get('sosContact') or {},
+        "isDemo": False,
+        "source": "esp32-telemetry-ai",
+        "createdAt": now_iso,
         "updatedAt": now_iso,
     }
 
-    # Broadcast real-time sensor updates over Socket.IO to connected dashboards
-    socketio.emit("live_vitals_stream", latest_data)
+    try:
+        db.reference(f"emergencyAlerts/{alert_id}").set(alert_record)
+        db.reference(f"patients/{patient_id}/activeEmergency").set(alert_record)
+        if firestore_client:
+            firestore_client.collection("emergencyAlerts").document(alert_id).set(alert_record)
+    except Exception as e:
+        print(f"[Telemetry Alert] Database write warning: {e}")
 
-    if patient_id:
-        socketio.emit("vitals_update", {
-            "patientId": patient_id,
-            "vitals": {
-                "heartRate": heart_rate,
-                "spo2": spo2,
-                "temperature": temperature,
-                "ecg": ecg,
-                "leadsOff": leads_off,
-            },
-            "timestamp": now_iso,
-        }, to=_patient_room(patient_id))
+    # Notify patient room and assigned doctor directly
+    socketio.emit('emergency:new', alert_record, to=_patient_room(patient_id))
+    if assigned_doc:
+        socketio.emit('emergency:new', alert_record, to=f"doctor:{assigned_doc}")
 
+
+@socketio.on('subscribe_patient')
+def on_subscribe_patient(data):
+    data = data if isinstance(data, dict) else {}
+    patient_id = str(data.get('patientId') or '').strip()
+    if not patient_id:
+        emit('subscription_error', {'message': 'patientId is required', 'code': 400})
+        return
+
+    sid = str(request.sid)
+    actor = chat_sid_context.get(sid) or {}
+
+    token = str(data.get('token') or data.get('authToken') or '').strip()
+    if token and not actor:
+        actor = _chat_extract_actor_from_payload(_decode_auth_token(token))
+        if actor:
+            _register_socket_user(sid, actor)
+
+    role = str(actor.get('role') or '').strip().lower()
+    if not role:
+        auth_hdr = str(request.headers.get('Authorization') or '').strip()
+        if auth_hdr.lower().startswith('bearer '):
+            actor = _chat_extract_actor_from_payload(_decode_auth_token(auth_hdr[7:].strip()))
+            if actor:
+                _register_socket_user(sid, actor)
+                role = str(actor.get('role') or '').strip().lower()
+
+    if not role:
+        print(f"[Socket.IO] Unauthenticated subscription attempt for patient {patient_id} from sid={sid[:8]}")
+        emit('subscription_error', {'message': 'Unauthorized. Authentication token is required.', 'code': 401})
+        return
+
+    if role == 'patient':
+        requester_patient_id = str(actor.get('patientId') or actor.get('id') or '').strip()
+        if not requester_patient_id or requester_patient_id != patient_id:
+            print(f"[Socket.IO] Access denied: patient {requester_patient_id} tried subscribing to patient {patient_id}")
+            emit('subscription_error', {'message': 'Access denied for this patient room.', 'code': 403})
+            return
+
+    elif role == 'doctor':
+        doctor_id = str(actor.get('doctorId') or actor.get('email') or actor.get('id') or '').strip().lower()
+        patient_record = _patient_collection_reference().child(patient_id).get()
+        if not isinstance(patient_record, dict):
+            emit('subscription_error', {'message': 'Patient record not found.', 'code': 404})
+            return
+
+        if not _doctor_owns_record(patient_record, doctor_id):
+            print(f"[Socket.IO] Access denied: doctor {doctor_id} tried subscribing to unassigned patient {patient_id}")
+            emit('subscription_error', {'message': 'Access denied. You are not assigned to this patient.', 'code': 403})
+            return
+
+    elif role == 'admin':
+        pass
+
+    else:
+        emit('subscription_error', {'message': 'Forbidden role for patient subscriptions.', 'code': 403})
+        return
+
+    join_room(_patient_room(patient_id))
+    emit('subscription_ok', {'patientId': patient_id, 'room': _patient_room(patient_id)})
+    print(f"[Socket.IO] Client {sid[:8]} ({role}) successfully subscribed to room patient:{patient_id}")
+
+
+# ============================================================================
+# 📡 PRODUCTION-READY ESP32 INGESTION & TELEMETRY SUBSYSTEM
+# ============================================================================
+
+@app.route("/api/esp32/update", methods=["POST"])
+def esp32_update():
+    payload = request.get_json(force=True, silent=True) or {}
+
+    device_id = str(request.headers.get('X-Device-ID') or payload.get('deviceId') or '').strip()
+    device_token = str(request.headers.get('X-Device-Token') or payload.get('deviceToken') or '').strip()
+
+    patient_id = ""
+    device_record = None
+
+    if device_id and device_token:
+        device_record, err = _verify_device_credentials(device_id, device_token)
+        if err:
+            print(f"[ESP32] Auth failed for device '{device_id}': {err}")
+            return jsonify({'status': 'error', 'message': err}), 401
+
+        patient_id = str(device_record.get('patientId') or '').strip()
+        if not patient_id:
+            return jsonify({'status': 'error', 'message': 'Device is not linked to a patient.'}), 400
+
+        now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         try:
-            _patient_collection_reference().child(patient_id).child('vitals').update({
-                'heartRate': heart_rate,
-                'spo2': spo2,
-                'temperature': temperature,
-                'updatedAt': now_iso,
+            _devices_collection_reference().child(device_id).update({
+                'lastSeen': now_iso,
+                'firmwareVersion': str(payload.get('firmwareVersion') or device_record.get('firmwareVersion') or '1.0.0'),
             })
-        except Exception as e:
-            print(f"[ESP32] Error syncing RTDB: {e}")
+        except Exception:
+            pass
+    else:
+        # Development mode fallback (if enabled explicitly by environment)
+        dev_mode_allowed = os.getenv('ALLOW_DEV_DEVICE_INSECURE', 'false').lower() in ('1', 'true', 'yes', 'y')
+        if not dev_mode_allowed:
+            return jsonify({
+                'status': 'error',
+                'message': 'Authentication required. Please provide X-Device-ID and X-Device-Token headers.'
+            }), 401
 
-    return jsonify({
-        "status": "received",
-        "data": latest_data
+        patient_id = str(payload.get("patientId") or payload.get("patient_id") or "").strip()
+        if not patient_id:
+            return jsonify({'status': 'error', 'message': 'patientId is required in dev mode.'}), 400
+
+    # Parse and validate telemetry values
+    try:
+        raw_hr = payload.get("heartRate") if payload.get("heartRate") is not None else payload.get("heart_rate", payload.get("bpm", 0))
+        raw_spo2 = payload.get("spo2") if payload.get("spo2") is not None else payload.get("spO2", payload.get("SpO2", 0))
+        raw_temp = payload.get("temperature") if payload.get("temperature") is not None else payload.get("temp", payload.get("temperatureC", 0))
+        raw_ecg = payload.get("ecg") if payload.get("ecg") is not None else payload.get("ecgValue", 0)
+        raw_leads = payload.get("leadsOff") if payload.get("leadsOff") is not None else payload.get("leadOff", False)
+
+        heart_rate = float(raw_hr)
+        spo2 = float(raw_spo2)
+        temperature = float(raw_temp)
+        ecg = int(raw_ecg)
+        leads_off = bool(raw_leads)
+    except (ValueError, TypeError) as err:
+        return jsonify({'status': 'error', 'message': f'Invalid telemetry number format: {err}'}), 400
+
+    # Physiological range validation
+    if not (0 <= heart_rate <= 250):
+        return jsonify({'status': 'error', 'message': f'Heart rate out of physiological range (0-250 BPM): {heart_rate}'}), 400
+    if not (0 <= spo2 <= 100):
+        return jsonify({'status': 'error', 'message': f'SpO2 out of range (0-100%): {spo2}'}), 400
+    if temperature != 0 and not (15.0 <= temperature <= 50.0):
+        return jsonify({'status': 'error', 'message': f'Temperature out of sensor range (15-50 C): {temperature}'}), 400
+
+    patient_record = _patient_collection_reference().child(patient_id).get()
+    if not isinstance(patient_record, dict):
+        return jsonify({'status': 'error', 'message': f'Patient {patient_id} not found in database.'}), 404
+
+    now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    _hardware_active_patients[patient_id] = time.time()
+
+    normalized = _normalize_patient_record(patient_id, patient_record, patient_record)
+    vitals_dict = {
+        'heart_rate': heart_rate,
+        'spo2': spo2,
+        'temperature': temperature,
+    }
+
+    # Run AI risk prediction on real hardware readings
+    prediction = predict_risk(vitals_dict)
+    with_audit = _append_prediction_audit(dict(normalized), prediction, 'esp32-hardware', vitals_dict)
+
+    # Persist authoritative hardware telemetry to Firebase RTDB
+    updated_record = _write_patient_record(patient_id, {
+        **with_audit,
+        'heart_rate': heart_rate,
+        'spo2': spo2,
+        'temperature': temperature,
+        'ecgData': [ecg] if ecg else normalized.get('ecgData'),
+        'leadsOff': leads_off,
+        'deviceConnected': True,
+        'dataSource': 'esp32-hardware',
+        'prediction': {
+            'risk': prediction.get('risk'),
+            'message': prediction.get('message'),
+            'status': prediction.get('prediction_status') or prediction.get('status') or prediction.get('risk'),
+            'confidence': prediction.get('confidence', 0.0),
+        },
+        'updatedAt': now_iso,
     })
 
+    # Evaluate critical clinical alerts
+    risk_level = str(prediction.get('risk') or '').lower()
+    is_critical = (
+        'critical' in risk_level or
+        'high' in risk_level or
+        (heart_rate > 150 or (heart_rate < 45 and heart_rate > 0)) or
+        (spo2 < 85 and spo2 > 0) or
+        (temperature > 39.5)
+    )
 
-@app.route("/api/live-vitals", methods=["GET"])
-def live_vitals():
-    return jsonify(latest_data)
+    if is_critical and not leads_off and (heart_rate > 0 or spo2 > 0):
+        try:
+            _evaluate_and_trigger_telemetry_emergency(patient_id, updated_record, vitals_dict, prediction)
+        except Exception as alert_err:
+            print(f"[ESP32] Emergency trigger warning: {alert_err}")
+
+    # Broadcast strictly to patient room
+    payload_response = _build_patient_payload_response(patient_id, updated_record)
+
+    socketio.emit('patient_snapshot', {
+        'patientId': patient_id,
+        'data': payload_response,
+    }, to=_patient_room(patient_id))
+
+    socketio.emit('vitals_update', {
+        'patientId': patient_id,
+        'vitals': {
+            'heartRate': heart_rate,
+            'spo2': spo2,
+            'temperature': temperature,
+            'ecg': ecg,
+            'leadsOff': leads_off,
+            'updatedAt': now_iso,
+            'dataSource': 'esp32-hardware',
+        },
+        'timestamp': now_iso,
+    }, to=_patient_room(patient_id))
+
+    socketio.emit('insights_update', {
+        'patientId': patient_id,
+        'prediction': payload_response['prediction'],
+    }, to=_patient_room(patient_id))
+
+    socketio.emit('device_status_update', {
+        'patientId': patient_id,
+        'deviceConnected': True,
+        'dataSource': 'esp32-hardware',
+        'lastSeen': now_iso,
+    }, to=_patient_room(patient_id))
+
+    return jsonify({
+        'status': 'success',
+        'patientId': patient_id,
+        'dataSource': 'esp32-hardware',
+        'timestamp': now_iso,
+        'prediction': payload_response['prediction'],
+    }), 200
+
+
+@app.route('/api/devices/register', methods=['POST'])
+@require_auth(roles={'doctor', 'admin'})
+def register_device():
+    try:
+        data = request.get_json(silent=True) or {}
+        device_id = str(data.get('deviceId') or '').strip()
+        patient_id = str(data.get('patientId') or '').strip()
+        raw_token = str(data.get('deviceToken') or '').strip()
+        device_name = str(data.get('name') or f"ESP32-{device_id}").strip()
+        firmware_version = str(data.get('firmwareVersion') or '1.0.0').strip()
+
+        if not device_id:
+            return api_error('deviceId is required.', 400)
+        if not patient_id:
+            return api_error('patientId is required.', 400)
+
+        patient_record = _patient_collection_reference().child(patient_id).get()
+        if not isinstance(patient_record, dict):
+            return api_error('Patient record not found.', 404)
+
+        if _request_user_role() == 'doctor':
+            doctor_id = _request_doctor_id()
+            if not _doctor_owns_record(patient_record, doctor_id):
+                return api_error('Access denied for this patient record.', 403)
+
+        # Verify existing device assignment to prevent unauthorized device hijacking
+        existing_device = _devices_collection_reference().child(device_id).get()
+        if isinstance(existing_device, dict):
+            current_linked_patient = str(existing_device.get('patientId') or '').strip()
+            if current_linked_patient and current_linked_patient != patient_id:
+                user_role = _request_user_role()
+                if user_role == 'doctor':
+                    doctor_id = _request_doctor_id()
+                    current_patient_record = _patient_collection_reference().child(current_linked_patient).get()
+                    if not isinstance(current_patient_record, dict) or not _doctor_owns_record(current_patient_record, doctor_id):
+                        return api_error('Access denied. Device is currently registered to another patient.', 403)
+
+                # Authorized reassignment: unlink device from previous patient safely
+                try:
+                    _patient_collection_reference().child(current_linked_patient).update({
+                        'deviceId': None,
+                        'deviceActive': False,
+                        'deviceConnected': False,
+                    })
+                except Exception:
+                    pass
+
+        if not raw_token:
+            raw_token = f"tok_{secrets.token_hex(16)}"
+
+        token_hash = _hash_device_token(raw_token)
+        now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        device_payload = {
+            'deviceId': device_id,
+            'patientId': patient_id,
+            'tokenHash': token_hash,
+            'name': device_name,
+            'firmwareVersion': firmware_version,
+            'active': True,
+            'createdAt': now_iso,
+            'lastSeen': None,
+            'registeredBy': _request_user_role(),
+        }
+
+        _devices_collection_reference().child(device_id).set(device_payload)
+
+        _patient_collection_reference().child(patient_id).update({
+            'deviceId': device_id,
+            'deviceActive': True,
+        })
+
+        return api_success('Device registered successfully.', {
+            'deviceId': device_id,
+            'patientId': patient_id,
+            'deviceToken': raw_token,
+            'name': device_name,
+            'firmwareVersion': firmware_version,
+            'active': True,
+            'createdAt': now_iso,
+        })
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/patient/<patient_id>/device', methods=['GET'])
+@require_auth(roles={'doctor', 'patient', 'admin'}, patient_id_arg='patient_id')
+def get_patient_device(patient_id):
+    try:
+        key = str(patient_id or '').strip()
+        patient_record = _patient_collection_reference().child(key).get()
+        if not isinstance(patient_record, dict):
+            return api_error('Patient not found.', 404)
+
+        device_id = str(patient_record.get('deviceId') or '').strip()
+        if not device_id:
+            return api_success('No device linked to patient.', {'linked': False})
+
+        device_record = _devices_collection_reference().child(device_id).get()
+        if not isinstance(device_record, dict):
+            return api_success('Device not found in registry.', {'linked': False, 'deviceId': device_id})
+
+        safe_record = dict(device_record)
+        safe_record.pop('tokenHash', None)
+        safe_record['linked'] = True
+        return api_success('Device details fetched successfully.', safe_record)
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/patient/<patient_id>/live-vitals', methods=['GET'])
+@require_auth(roles={'doctor', 'patient', 'admin'}, patient_id_arg='patient_id')
+def get_patient_live_vitals(patient_id):
+    try:
+        key = str(patient_id or '').strip()
+        record = _patient_collection_reference().child(key).get()
+        if not isinstance(record, dict):
+            return api_error('Patient not found.', 404)
+
+        normalized = _normalize_patient_record(key, record, record)
+        payload = _build_patient_payload_response(key, normalized)
+        return api_success('Live vitals fetched successfully.', payload.get('vitals'))
+    except Exception as err:
+        return api_error(str(err), 500)
 
 
 # ============================================================================
 # 🚨 EMERGENCY RESPONSE & AMBULANCE DISPATCH SYSTEM
 # ============================================================================
 
-# SECURITY FIX: Dynamically resolve assigned doctor and enforce isolation in emergency_trigger
+# SECURITY FIX: Enforce strict authentication, device verification, and doctor-patient ownership on emergency_trigger
 @app.route("/api/emergency/trigger", methods=["POST"])
 def emergency_trigger():
     try:
         data = request.get_json(silent=True) or {}
+        device_id = request.headers.get('X-Device-ID')
+        device_token = request.headers.get('X-Device-Token')
+        role = _request_user_role()
+
+        patient_id = ""
+        actor_name = "system"
+
+        # 1. Device authentication (Hardware automatic emergency)
+        if device_id and device_token:
+            is_valid, device_record, auth_err = _verify_device_credentials(device_id, device_token)
+            if not is_valid:
+                return jsonify({"status": "error", "message": f"Unauthorized device: {auth_err}"}), 401
+            patient_id = str(device_record.get('patientId') or '').strip()
+            actor_name = f"hardware_device_{device_id}"
+
+        # 2. User authentication (Patient self or assigned Doctor or Admin)
+        elif role:
+            if role == 'patient':
+                auth_patient_id = _request_patient_id()
+                if not auth_patient_id:
+                    return jsonify({"status": "error", "message": "Patient identity required."}), 401
+                body_pid = str(data.get("patientId") or "").strip()
+                if body_pid and body_pid != auth_patient_id:
+                    return jsonify({"status": "error", "message": "Forbidden. You can only trigger an emergency for yourself."}), 403
+                patient_id = auth_patient_id
+                actor_name = "patient"
+
+            elif role == 'doctor':
+                doctor_id = _request_doctor_id()
+                if not doctor_id:
+                    return jsonify({"status": "error", "message": "Doctor identity required."}), 401
+                body_pid = str(data.get("patientId") or "").strip()
+                if not body_pid:
+                    return jsonify({"status": "error", "message": "patientId is required."}), 400
+                precord = _patient_collection_reference().child(body_pid).get()
+                if not isinstance(precord, dict):
+                    return jsonify({"status": "error", "message": "Patient record not found."}), 404
+                if not _doctor_owns_record(precord, doctor_id):
+                    return jsonify({"status": "error", "message": "Forbidden. You are not assigned to this patient."}), 403
+                patient_id = body_pid
+                actor_name = f"doctor_{doctor_id}"
+
+            elif role == 'admin':
+                body_pid = str(data.get("patientId") or "").strip()
+                if not body_pid:
+                    return jsonify({"status": "error", "message": "patientId is required."}), 400
+                patient_id = body_pid
+                actor_name = "admin"
+            else:
+                return jsonify({"status": "error", "message": "Forbidden. Role not authorized."}), 403
+
+        else:
+            return jsonify({"status": "error", "message": "Unauthorized. Valid authentication token or device credentials required."}), 401
+
+        if not patient_id:
+            return jsonify({"status": "error", "message": "Could not resolve patient identity."}), 400
+
+        # Dynamically lookup patient from RTDB to ensure genuine assignment
+        patient_record = _patient_collection_reference().child(patient_id).get() or {}
+        patient_name = patient_record.get('name') if isinstance(patient_record, dict) else "Patient"
+        assigned_doc = ""
+        if isinstance(patient_record, dict):
+            assigned_doc = str(patient_record.get('assignedDoctorId') or patient_record.get('doctorId') or patient_record.get('doctorEmail') or '').strip().lower()
+        doctor_id = assigned_doc or "general-triage"
+
         alert_id = str(data.get("alertId") or f"emg-{int(time.time() * 1000)}").strip()
-        patient_id = str(data.get("patientId") or "").strip()
-        patient_name = str(data.get("patientName") or "").strip()
         trigger_reason = str(data.get("triggerReason") or "Critical vital thresholds breached").strip()
         vitals = data.get("vitals") or {}
         location = data.get("location") or {}
-        doctor_id = str(data.get("doctorId") or "").strip().lower()
-        sos_contact = data.get("sosContact") or {}
+        sos_contact = data.get("sosContact") or (patient_record.get("emergencyContact") if isinstance(patient_record, dict) else {}) or {}
         is_demo = bool(data.get("isDemo", False))
-
-        # Dynamically lookup patient from RTDB to ensure genuine assignment
-        if patient_id:
-            patient_record = _patient_collection_reference().child(patient_id).get()
-            if isinstance(patient_record, dict):
-                patient_name = patient_record.get('name') or patient_name or "Patient"
-                assigned_doc = str(patient_record.get('assignedDoctorId') or patient_record.get('doctorId') or patient_record.get('doctorEmail') or '').strip().lower()
-                if assigned_doc:
-                    doctor_id = assigned_doc
-
-        if not patient_name:
-            patient_name = "Patient"
-        if not doctor_id:
-            doctor_id = "general-triage"
 
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
@@ -5405,7 +5847,7 @@ def emergency_trigger():
             "auditLog": [
                 {
                     "timestamp": now_iso,
-                    "actor": "system_monitoring",
+                    "actor": actor_name,
                     "action": "CRITICAL_CONDITION_DETECTED",
                     "details": trigger_reason,
                 },
@@ -5629,17 +6071,61 @@ def emergency_update_status(alert_id):
         return jsonify({"status": "error", "message": str(err)}), 500
 
 
+# SECURITY FIX: Authorize ambulance request (assigned doctor or affected patient only)
 @app.route("/api/emergency/ambulance-request", methods=["POST"])
 def emergency_ambulance_request():
     try:
+        role = _request_user_role()
+        if not role:
+            return jsonify({"status": "error", "message": "Unauthorized. Authentication token is required."}), 401
+
         data = request.get_json(silent=True) or {}
-        alert_id = str(data.get("alertId") or f"emg-{int(time.time())}").strip()
-        patient_id = str(data.get("patientId") or "pat-2026-2007").strip()
-        patient_name = str(data.get("patientName") or "Patient").strip()
+        alert_id = str(data.get("alertId") or "").strip()
+        if not alert_id:
+            return jsonify({"status": "error", "message": "alertId is required."}), 400
+
+        # Load existing alert from RTDB or Firestore
+        rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
+        existing = None
+        try:
+            existing = rtdb_ref.get()
+        except Exception as rtdb_err:
+            print(f"[Emergency] RTDB fetch warning: {rtdb_err}")
+
+        if not existing and firestore_client:
+            try:
+                fdoc = firestore_client.collection("emergencyAlerts").document(alert_id).get()
+                if fdoc.exists:
+                    existing = fdoc.to_dict()
+            except Exception as fs_err:
+                print(f"[Emergency] Firestore fetch warning: {fs_err}")
+
+        if not existing or not isinstance(existing, dict):
+            return jsonify({"status": "error", "message": "Alert not found."}), 404
+
+        alert_pid = str(existing.get('patientId') or '').strip()
+        alert_doc = str(existing.get('assignedDoctorId') or existing.get('doctorId') or '').strip().lower()
+
+        # Authorization check
+        if role == 'patient':
+            patient_id = _request_patient_id()
+            if not patient_id or patient_id != alert_pid:
+                return jsonify({"status": "error", "message": "Forbidden. Access denied for this alert."}), 403
+
+        elif role == 'doctor':
+            doctor_id = _request_doctor_id()
+            precord = _patient_collection_reference().child(alert_pid).get() if alert_pid else {}
+            if doctor_id != alert_doc and not (isinstance(precord, dict) and _doctor_owns_record(precord, doctor_id)):
+                return jsonify({"status": "error", "message": "Forbidden. You are not assigned to this patient's emergency."}), 403
+
+        elif role == 'admin':
+            pass
+        else:
+            return jsonify({"status": "error", "message": "Forbidden. Role not authorized."}), 403
+
         is_demo = bool(data.get("isDemo", False))
         urgency = str(data.get("urgency") or "CRITICAL").strip()
         notes = str(data.get("notes") or "").strip()
-        location = data.get("location") or {}
 
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         provider_name = "Demo Emergency Dispatch" if is_demo else "Hospital Emergency Medical Transport"
@@ -5659,15 +6145,13 @@ def emergency_ambulance_request():
 
         audit_entry = {
             "timestamp": now_iso,
-            "actor": "patient",
+            "actor": role,
             "action": "AMBULANCE_REQUESTED",
             "details": f"Dispatched via {provider_name} [Vehicle: {vehicle_id}, ETA: {eta_minutes}m]"
         }
 
         # Update RTDB
         try:
-            rtdb_ref = db.reference(f"emergencyAlerts/{alert_id}")
-            existing = rtdb_ref.get() or {}
             audit_log = existing.get("auditLog", []) if isinstance(existing, dict) else []
             audit_log.append(audit_entry)
             rtdb_ref.update({

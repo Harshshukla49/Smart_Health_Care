@@ -280,15 +280,28 @@ export function LiveVitalsProvider({ children }) {
       return undefined;
     }
 
+    // Immediately clear previous patient state to prevent stale data leakage across patients
+    setVitals(DEFAULT_VITALS);
+    setEcgData([]);
+    setError(null);
     clearSocket();
     clearTimers();
 
+    const session = getAuthSession();
+    const token = session?.token;
+
     const socket = io(SOCKET_BASE_URL, {
       transports: ['websocket', 'polling'],
+      auth: {
+        token: token,
+        role: session?.role,
+        patientId: session?.patientId,
+        doctorId: session?.doctorId,
+      },
     });
 
     socketRef.current = socket;
-    socket.emit('subscribe_patient', { patientId });
+    socket.emit('subscribe_patient', { patientId, token });
 
     socket.on('vitals_update', (payload) => {
       scheduleIncomingState(payload);
@@ -296,6 +309,10 @@ export function LiveVitalsProvider({ children }) {
 
     socket.on('patient_snapshot', (payload) => {
       scheduleIncomingState(payload?.data || payload);
+    });
+
+    socket.on('subscription_error', (err) => {
+      console.warn(`[LiveVitals] Socket subscription error for patient ${patientId}:`, err);
     });
 
     pollRef.current = window.setInterval(async () => {
