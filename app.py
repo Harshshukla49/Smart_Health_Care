@@ -4999,6 +4999,12 @@ def on_call_request(data):
     except Exception as e:
         print(f"[CALL] Error writing call to RTDB: {e}")
 
+    # Join caller to dedicated call room
+    try:
+        join_room(f"call_{call_id}", sid=request.sid)
+    except Exception:
+        pass
+
     # Emit incoming call directly to the receiver's room and active sockets
     delivered_count = _chat_emit_to_user(receiver_role, receiver_id, 'call:incoming', call_payload)
     print(f"[WEBRTC-CALL] Incoming call dispatch: caller={caller_role}:{caller_id} -> receiver={receiver_role}:{receiver_id}, delivered={delivered_count}, sessions={list(receiver_sessions)}")
@@ -5007,6 +5013,10 @@ def on_call_request(data):
         socketio.emit('call:incoming', call_payload, room=f"patient:{patient_id.lower()}")
         socketio.emit('call:incoming', call_payload, to=f"patient:{patient_id.lower()}")
         for s in receiver_sessions:
+            try:
+                join_room(f"call_{call_id}", sid=s)
+            except Exception:
+                pass
             socketio.emit('call:incoming', call_payload, room=s)
             socketio.emit('call:incoming', call_payload, to=s)
     else:
@@ -5016,6 +5026,10 @@ def on_call_request(data):
             socketio.emit('call:incoming', call_payload, room=f"doctor:{doctor_id.split('@')[0].lower()}")
             socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.split('@')[0].lower()}")
         for s in receiver_sessions:
+            try:
+                join_room(f"call_{call_id}", sid=s)
+            except Exception:
+                pass
             socketio.emit('call:incoming', call_payload, room=s)
             socketio.emit('call:incoming', call_payload, to=s)
 
@@ -5032,6 +5046,11 @@ def on_call_accept(data):
     patient_id = str(payload.get('patientId') or call_info.get('patientId') or '').strip()
     doctor_id = str(payload.get('doctorId') or call_info.get('doctorId') or '').strip().lower()
     caller_role = str(call_info.get('callerRole') or 'patient').strip().lower()
+
+    try:
+        join_room(f"call_{call_id}", sid=request.sid)
+    except Exception:
+        pass
 
     now_iso = _chat_now_iso()
     if call_id in active_video_calls:
@@ -5056,6 +5075,9 @@ def on_call_accept(data):
         'acceptedAt': now_iso,
         'threadId': call_info.get('threadId') or f"d_{_chat_safe_key(doctor_id)}__p_{_chat_safe_key(patient_id)}",
     }
+
+    socketio.emit('call:accepted', accept_payload, room=f"call_{call_id}")
+    socketio.emit('call:accepted', accept_payload, to=f"call_{call_id}")
 
     # If Doctor was the caller, notify Doctor when Patient accepts.
     # If Patient was the caller, notify Patient when Doctor accepts.
@@ -5096,6 +5118,9 @@ def on_call_reject(data):
         'threadId': call_info.get('threadId') or '',
     }
 
+    socketio.emit('call:rejected', reject_payload, room=f"call_{call_id}")
+    socketio.emit('call:rejected', reject_payload, to=f"call_{call_id}")
+
     if caller_role == 'doctor':
         socketio.emit('call:rejected', reject_payload, to=f"doctor:{doctor_id.lower()}")
         _chat_emit_to_user('doctor', doctor_id, 'call:rejected', reject_payload)
@@ -5131,6 +5156,9 @@ def on_call_end(data):
         'endedAt': now_iso,
         'threadId': call_info.get('threadId') or '',
     }
+
+    socketio.emit('call:ended', end_payload, room=f"call_{call_id}")
+    socketio.emit('call:ended', end_payload, to=f"call_{call_id}")
 
     if patient_id:
         socketio.emit('call:ended', end_payload, to=f"patient:{patient_id.lower()}")

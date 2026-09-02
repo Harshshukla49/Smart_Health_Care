@@ -159,6 +159,7 @@ export function VideoCallProvider({ children }) {
   const iceCandidateQueueRef = useRef([]);
   const audioContextRef = useRef(null);
   const ringtoneTimerRef = useRef(null);
+  const isRingtonePlayingRef = useRef(false);
   const ringtoneMasterGainRef = useRef(null);
   const activeOscillatorsRef = useRef(new Set());
   const callTimerRef = useRef(null);
@@ -169,54 +170,46 @@ export function VideoCallProvider({ children }) {
     activeCallRef.current = activeCall;
   }, [activeCall]);
 
-  // Helper to ensure AudioContext and Master Gain
-  const getAudioContext = useCallback(() => {
-    try {
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if (!AudioCtx) return null;
-      if (!audioContextRef.current) {
-        audioContextRef.current = new AudioCtx();
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') {
-        ctx.resume().catch(() => {});
-      }
-      if (!ringtoneMasterGainRef.current) {
-        const masterGain = ctx.createGain();
-        masterGain.connect(ctx.destination);
-        ringtoneMasterGainRef.current = masterGain;
-      }
-      return ctx;
-    } catch {
-      return null;
-    }
-  }, []);
-
-  // Universal Stop for All Ringing & Tone Sounds
+  // Universal Stop for All Call Audio Sounds (Ringtone, Chime, Burst)
   const stopAllCallSounds = useCallback(() => {
-    console.log('[RINGTONE] Stopping all call sounds immediately');
+    console.log('[RINGTONE-ENGINE] Hard stopping ALL ringtone and audio sources');
+    isRingtonePlayingRef.current = false;
+
+    // 1. Clear repeating interval timers immediately
     if (ringtoneTimerRef.current) {
       clearInterval(ringtoneTimerRef.current);
       ringtoneTimerRef.current = null;
     }
 
-    // Mute master gain immediately to stop any in-flight sound
-    if (ringtoneMasterGainRef.current && audioContextRef.current) {
-      try {
-        const ctx = audioContextRef.current;
-        ringtoneMasterGainRef.current.gain.cancelScheduledValues(ctx.currentTime);
-        ringtoneMasterGainRef.current.gain.setValueAtTime(0, ctx.currentTime);
-      } catch {}
-    }
-
-    // Stop and disconnect all active oscillator nodes
+    // 2. Stop and disconnect every tracked oscillator node
     activeOscillatorsRef.current.forEach((osc) => {
       try {
+        osc.onended = null;
         osc.stop(0);
         osc.disconnect();
       } catch {}
     });
     activeOscillatorsRef.current.clear();
+
+    // 3. Immediately mute and disconnect master gain
+    if (ringtoneMasterGainRef.current) {
+      try {
+        if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+          const currentTime = audioContextRef.current.currentTime;
+          ringtoneMasterGainRef.current.gain.cancelScheduledValues(currentTime);
+          ringtoneMasterGainRef.current.gain.setValueAtTime(0, currentTime);
+        }
+        ringtoneMasterGainRef.current.disconnect();
+      } catch {}
+      ringtoneMasterGainRef.current = null;
+    }
+
+    // 4. Suspend audio context immediately to completely halt hardware audio output
+    if (audioContextRef.current && audioContextRef.current.state === 'running') {
+      try {
+        audioContextRef.current.suspend().catch(() => {});
+      } catch {}
+    }
   }, []);
 
   const stopRingtone = useCallback(() => {
@@ -226,37 +219,55 @@ export function VideoCallProvider({ children }) {
   // Synthesize Realistic Clinical Dual-Tone Ringtone via Web Audio API
   const startRingtone = useCallback(() => {
     stopAllCallSounds(); // Prevent overlapping interval leaks
-    console.log('[RINGTONE] Starting ringtone');
+    isRingtonePlayingRef.current = true;
+    console.log('[RINGTONE-ENGINE] Starting ringtone synthesis');
 
     try {
-      const ctx = getAudioContext();
-      if (!ctx || !ringtoneMasterGainRef.current) return;
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!audioContextRef.current || audioContextRef.current.state === 'closed') {
+        audioContextRef.current = new AudioCtx();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      // Create fresh master gain dedicated to this ring session
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(1, ctx.currentTime);
+      masterGain.connect(ctx.destination);
+      ringtoneMasterGainRef.current = masterGain;
 
       const playBurst = () => {
+        // STRICT GUARD: If ringtone was stopped, ABORT IMMEDIATELY!
+        if (!isRingtonePlayingRef.current || !audioContextRef.current || audioContextRef.current.state === 'closed') {
+          return;
+        }
+
         try {
-          if (!audioContextRef.current || !ringtoneMasterGainRef.current) return;
           const currentCtx = audioContextRef.current;
           if (currentCtx.state === 'suspended') {
             currentCtx.resume().catch(() => {});
           }
 
-          const masterGain = ringtoneMasterGainRef.current;
-          masterGain.gain.cancelScheduledValues(currentCtx.currentTime);
-          masterGain.gain.setValueAtTime(1, currentCtx.currentTime);
+          const currentMaster = ringtoneMasterGainRef.current;
+          if (!currentMaster || !isRingtonePlayingRef.current) return;
 
           const osc1 = currentCtx.createOscillator();
           const osc2 = currentCtx.createOscillator();
           const burstGain = currentCtx.createGain();
 
-          osc1.frequency.value = 440; // Clinical tone A4
-          osc2.frequency.value = 480; // Clinical tone B4
+          osc1.frequency.value = 440; // Clinical dial tone A4
+          osc2.frequency.value = 480; // Clinical dial tone B4
 
           burstGain.gain.setValueAtTime(0.04, currentCtx.currentTime);
-          burstGain.gain.exponentialRampToValueAtTime(0.001, currentCtx.currentTime + 1.8);
+          burstGain.gain.exponentialRampToValueAtTime(0.0001, currentCtx.currentTime + 1.8);
 
           osc1.connect(burstGain);
           osc2.connect(burstGain);
-          burstGain.connect(masterGain);
+          burstGain.connect(currentMaster);
 
           activeOscillatorsRef.current.add(osc1);
           activeOscillatorsRef.current.add(osc2);
@@ -279,16 +290,23 @@ export function VideoCallProvider({ children }) {
           osc1.stop(currentCtx.currentTime + 1.8);
           osc2.stop(currentCtx.currentTime + 1.8);
         } catch (err) {
-          console.warn('[RINGTONE] Burst error:', err);
+          console.warn('[RINGTONE-ENGINE] Burst error:', err);
         }
       };
 
       playBurst();
-      ringtoneTimerRef.current = window.setInterval(playBurst, 3200);
+      ringtoneTimerRef.current = window.setInterval(() => {
+        if (isRingtonePlayingRef.current) {
+          playBurst();
+        } else if (ringtoneTimerRef.current) {
+          clearInterval(ringtoneTimerRef.current);
+          ringtoneTimerRef.current = null;
+        }
+      }, 3200);
     } catch (err) {
-      console.warn('[RINGTONE] Initialization error:', err);
+      console.warn('[RINGTONE-ENGINE] Start error:', err);
     }
-  }, [getAudioContext, stopAllCallSounds]);
+  }, [stopAllCallSounds]);
 
   // Automatic Safety Kill-Switch: Ensure ringtone NEVER plays outside 'incoming' or 'calling'
   useEffect(() => {
@@ -313,10 +331,17 @@ export function VideoCallProvider({ children }) {
 
   // Play pleasant call connected chime
   const playConnectChime = useCallback(() => {
+    stopAllCallSounds();
     try {
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
-      const ctx = audioContextRef.current || new AudioCtx();
+      const ctx = (audioContextRef.current && audioContextRef.current.state !== 'closed')
+        ? audioContextRef.current
+        : new AudioCtx();
+      audioContextRef.current = ctx;
+      if (ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
       osc.type = 'sine';
@@ -331,7 +356,7 @@ export function VideoCallProvider({ children }) {
     } catch {
       // ignore audio error
     }
-  }, []);
+  }, [stopAllCallSounds]);
 
   // Real Camera & Mic Stream acquisition
   const acquireMediaStream = useCallback(async () => {
