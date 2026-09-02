@@ -132,7 +132,7 @@ export function VideoCallProvider({ children }) {
   const currentUserId = isDoctor
     ? String(session?.doctorId || session?.email || '').trim()
     : String(session?.patientId || '').trim();
-  const currentUserEmail = String(session?.email || '').trim().lower();
+  const currentUserEmail = String(session?.email || '').trim().toLowerCase();
   const currentUserName = session?.name || (isDoctor ? 'Doctor' : 'Patient');
   const authToken = String(session?.token || '').trim();
 
