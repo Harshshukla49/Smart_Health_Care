@@ -22,13 +22,26 @@ export function VideoCallDialerModal() {
 
   // Secondary Preference State: 'specialist' | 'dialpad'
   const [secondaryTab, setSecondaryTab] = useState('specialist');
-  const [selectedPhysicianId, setSelectedPhysicianId] = useState(HOSPITAL_PHYSICIANS[1].id);
+  const [selectedPhysicianId, setSelectedPhysicianId] = useState(HOSPITAL_PHYSICIANS[0]?.id || 'DOC-EM-02');
   const [dialedNumber, setDialedNumber] = useState('');
 
   if (!isDialerOpen) return null;
 
-  // First preference doctor is the patient's assigned doctor (or provided default)
-  const assignedDoctor = dialerDefaultDoctor || HOSPITAL_PHYSICIANS.find((d) => d.isAssigned) || HOSPITAL_PHYSICIANS[0];
+  // First preference doctor is the patient's dynamically assigned doctor
+  const assignedDoctor = dialerDefaultDoctor || {
+    id: 'DOC-CARE-TEAM',
+    name: 'Assigned Physician Care Team',
+    doctorName: 'Assigned Physician Care Team',
+    role: 'doctor',
+    title: 'Attending Physician',
+    department: 'Cardiology & Intensive Ward 4B',
+    phone: '+91 98765 43210',
+    extension: '401',
+    avatar: '/assets/doctor-command-center.png',
+    status: 'online',
+    isAssigned: false,
+  };
+
   const otherPhysicians = HOSPITAL_PHYSICIANS.filter((d) => d.id !== assignedDoctor.id && d.name !== assignedDoctor.name);
 
   // Dial pad keys
@@ -129,7 +142,7 @@ export function VideoCallDialerModal() {
             <div className="flex items-center justify-between gap-2 mb-3">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-[#0284C7] text-white px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider shadow-2xs">
                 <Star className="h-3 w-3 fill-current text-amber-300" />
-                <span>First Preference · Assigned Doctor</span>
+                <span>First Preference · {assignedDoctor.isAssigned ? 'Assigned Doctor' : 'On-Duty Physician'}</span>
               </span>
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700">
                 <span className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
@@ -138,18 +151,24 @@ export function VideoCallDialerModal() {
             </div>
 
             <div className="flex items-center gap-3.5">
-              <img
-                src={assignedDoctor.avatar}
-                alt={assignedDoctor.name}
-                className="h-14 w-14 rounded-2xl object-cover border-2 border-white shadow-xs shrink-0"
-              />
+              {assignedDoctor.avatar ? (
+                <img
+                  src={assignedDoctor.avatar}
+                  alt={assignedDoctor.name}
+                  className="h-14 w-14 rounded-2xl object-cover border-2 border-white shadow-xs shrink-0"
+                />
+              ) : (
+                <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-[#0284C7] to-blue-700 text-white font-black text-lg grid place-items-center border-2 border-white shadow-xs shrink-0">
+                  {(assignedDoctor.name || 'DR').replace('Dr.', '').trim().slice(0, 2).toUpperCase() || 'DR'}
+                </div>
+              )}
               <div className="min-w-0 flex-1">
                 <h3 className="text-base font-extrabold text-[#0F172A] truncate">
                   {assignedDoctor.name}
                 </h3>
-                <p className="text-xs font-semibold text-[#0284C7]">{assignedDoctor.title}</p>
+                <p className="text-xs font-semibold text-[#0284C7]">{assignedDoctor.title || 'Attending Physician'}</p>
                 <p className="text-[11px] text-[#64748B] mt-0.5">
-                  {assignedDoctor.department} · Ext: <strong className="text-[#0F172A] font-mono">{assignedDoctor.extension}</strong>
+                  {assignedDoctor.department || 'Cardiology & Intensive Telemetry'} · Ext: <strong className="text-[#0F172A] font-mono">{assignedDoctor.extension || '401'}</strong>
                 </p>
               </div>
             </div>
@@ -157,7 +176,7 @@ export function VideoCallDialerModal() {
             <div className="mt-3.5 pt-3 border-t border-sky-100 flex flex-col sm:flex-row items-center gap-2.5 justify-between">
               <div className="text-[11px] text-[#64748B] flex items-center gap-1.5 self-start sm:self-center">
                 <ShieldCheck className="h-4 w-4 text-emerald-600 shrink-0" />
-                <span>Primary Cardiologist assigned to your monitoring record</span>
+                <span>Primary physician linked to your patient telemetry record</span>
               </div>
               <button
                 type="button"

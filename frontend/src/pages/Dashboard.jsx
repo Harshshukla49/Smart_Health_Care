@@ -319,6 +319,18 @@ function DashboardBody({ liveVitals }) {
         if (profile?.gender) {
           setPatientGender(profile.gender);
         }
+
+        const currentSession = getAuthSession();
+        if (currentSession && normalizeRole(currentSession.role) === 'patient') {
+          setAuthSession({
+            ...currentSession,
+            doctorId: String(profile?.doctorId || profile?.assignedDoctorId || doctorEmailValue || currentSession.doctorId || '').trim(),
+            doctorEmail: String(doctorEmailValue || currentSession.doctorEmail || '').trim(),
+            doctorName: String(doctorNameValue || currentSession.doctorName || '').trim(),
+            doctorPhone: String(doctorPhoneValue || currentSession.doctorPhone || '').trim(),
+            doctorSpecialty: String(doctorSpecialtyValue || currentSession.doctorSpecialty || '').trim(),
+          });
+        }
       } catch {
         if (active) {
           setDoctorEmail('');
@@ -417,10 +429,10 @@ function DashboardBody({ liveVitals }) {
   // Dynamically resolve attending doctor details (zero hardcoded mock fallbacks)
   const rawDoctorName = isDoctor
     ? (session?.name || 'Attending Physician')
-    : (doctorName || session?.doctorName || (doctorEmail ? doctorEmail.split('@')[0] : 'Assigned Physician'));
-  const attendingDoctorName = rawDoctorName.toLowerCase().startsWith('dr.')
-    ? rawDoctorName
-    : `Dr. ${rawDoctorName}`;
+    : (doctorName || session?.doctorName || (doctorEmail ? doctorEmail.split('@')[0] : ''));
+  const attendingDoctorName = rawDoctorName
+    ? (rawDoctorName.toLowerCase().startsWith('dr.') ? rawDoctorName : `Dr. ${rawDoctorName}`)
+    : 'Assigned Physician';
 
   const attendingDoctorEmail = isDoctor
     ? (session?.email || '')
@@ -1322,7 +1334,7 @@ function DashboardBody({ liveVitals }) {
                         </div>
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Attending</p>
-                          <p className="font-semibold text-[#0F172A] mt-0.5 truncate">{attendingDoctorName || 'Dr. Abhishek Rai'}</p>
+                          <p className="font-semibold text-[#0F172A] mt-0.5 truncate">{attendingDoctorName || 'Assigned Physician'}</p>
                         </div>
                         <div>
                           <p className="text-[10px] font-bold uppercase tracking-wider text-[#94A3B8]">Last Check</p>
@@ -1338,21 +1350,21 @@ function DashboardBody({ liveVitals }) {
                       <div className="flex items-start justify-between gap-3">
                         <div className="flex items-center gap-3">
                           <div className="grid h-12 w-12 place-items-center rounded-2xl bg-teal-50 border border-teal-200 text-[#0D9488] font-black text-base shadow-xs">
-                            {(attendingDoctorName || 'Dr. Abhishek Rai')
-                              .replace('Dr.', '')
+                            {(attendingDoctorName || 'Assigned Physician')
+                              .replace(/^Dr\.\s*/i, '')
                               .trim()
                               .split(' ')
                               .map((n) => n[0])
                               .join('')
                               .slice(0, 2)
-                              .toUpperCase()}
+                              .toUpperCase() || 'MD'}
                           </div>
                           <div className="min-w-0">
                             <h4 className="font-sans text-base font-bold text-[#0F172A] leading-tight truncate">
-                              {attendingDoctorName || 'Dr. Abhishek Rai'}
+                              {attendingDoctorName || 'Assigned Physician'}
                             </h4>
                             <p className="text-xs font-medium text-[#0D9488] mt-0.5">
-                              {attendingDoctorSpecialty || 'Consultant Cardiologist'}
+                              {attendingDoctorSpecialty || 'Attending Physician'}
                             </p>
                           </div>
                         </div>
@@ -1365,7 +1377,7 @@ function DashboardBody({ liveVitals }) {
                       <div className="mt-4 pt-3.5 border-t border-slate-100 space-y-1.5 text-xs text-[#64748B]">
                         <p className="flex items-center gap-2">
                           <Mail className="h-3.5 w-3.5 text-slate-400 shrink-0" />
-                          <span className="truncate">{attendingDoctorEmail || 'cardiology@hospital.org'}</span>
+                          <span className="truncate">{attendingDoctorEmail || 'careteam@hospital.org'}</span>
                         </p>
                         <p className="flex items-center gap-2">
                           <Phone className="h-3.5 w-3.5 text-slate-400 shrink-0" />

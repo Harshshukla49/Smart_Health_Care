@@ -1,7 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import toast from 'react-hot-toast';
 import { io } from 'socket.io-client';
-import { getAuthSession, normalizeRole } from '../utils/auth';
+import { getAuthSession, setAuthSession, normalizeRole } from '../utils/auth';
+import { getApiPatientById } from '../services/api';
 
 const VideoCallContext = createContext(null);
 
@@ -26,20 +27,8 @@ const RTC_CONFIG = {
   ],
 };
 
-// Standard Available Hospital Physicians (Fallback roster for patient dialing)
+// Standard Available Hospital Specialist Department extensions (Available for direct dial)
 export const HOSPITAL_PHYSICIANS = [
-  {
-    id: 'DOC-4B-01',
-    name: 'Dr. Abhishek Rai',
-    role: 'doctor',
-    title: 'Chief of Cardiology',
-    department: 'Cardiology & Intensive Ward 4B',
-    phone: '+91 98765 43210',
-    extension: '401',
-    avatar: '/assets/doctor-command-center.png',
-    status: 'online',
-    isAssigned: false,
-  },
   {
     id: 'DOC-EM-02',
     name: 'Dr. Priya Sharma',
@@ -90,6 +79,39 @@ export const HOSPITAL_PHYSICIANS = [
   },
 ];
 
+export const getAssignedDoctorFromSession = (session) => {
+  if (!session || normalizeRole(session.role) !== 'patient') return null;
+  const docId = String(session.doctorId || session.doctorEmail || session.assignedDoctorId || '').trim();
+  const docName = String(session.doctorName || session.assignedDoctorName || '').trim();
+  const docEmail = String(session.doctorEmail || (docId.includes('@') ? docId : '')).trim();
+  const docPhone = String(session.doctorPhone || '').trim();
+  const docSpecialty = String(session.doctorSpecialty || 'Attending Physician').trim();
+
+  if (!docId && !docName && !docEmail) {
+    return null;
+  }
+
+  const formattedName = docName
+    ? (docName.toLowerCase().startsWith('dr.') ? docName : `Dr. ${docName}`)
+    : (docEmail ? `Dr. ${docEmail.split('@')[0]}` : 'Assigned Physician');
+
+  return {
+    id: docId || docEmail || 'DOC-ASSIGNED',
+    doctorId: docId || docEmail,
+    email: docEmail,
+    name: formattedName,
+    doctorName: formattedName,
+    role: 'doctor',
+    title: docSpecialty || 'Attending Physician',
+    department: 'Cardiology & Intensive Ward 4B',
+    phone: docPhone || '+91 98765 43210',
+    extension: '401',
+    avatar: '/assets/doctor-command-center.png',
+    status: 'online',
+    isAssigned: true,
+  };
+};
+
 export function VideoCallProvider({ children }) {
   const session = getAuthSession();
   const userRole = normalizeRole(session?.role);
@@ -99,9 +121,9 @@ export function VideoCallProvider({ children }) {
     : (session?.patientId || '');
   const currentUserName = session?.name || (isDoctor ? 'Doctor' : 'Patient');
 
-  // Modal & Call States
+  // Modal & Call States - Dynamically initialized from the authenticated patient's assigned doctor
   const [isDialerOpen, setIsDialerOpen] = useState(false);
-  const [dialerDefaultDoctor, setDialerDefaultDoctor] = useState(HOSPITAL_PHYSICIANS[0]);
+  const [dialerDefaultDoctor, setDialerDefaultDoctor] = useState(() => getAssignedDoctorFromSession(getAuthSession()));
 
   // Call Lifecycle: 'idle' | 'calling' | 'incoming' | 'connecting' | 'connected' | 'rejected' | 'busy' | 'unavailable' | 'ended' | 'failed'
   const [callState, setCallState] = useState('idle');
@@ -574,28 +596,87 @@ export function VideoCallProvider({ children }) {
     };
   }, [callState]);
 
+  // Synchronize dynamic assigned doctor details for patient accounts in background
+  useEffect(() => {
+    let active = true;
+    const syncDoctorDetails = async () => {
+      const currentSession = getAuthSession();
+      if (!currentSession || normalizeRole(currentSession.role) !== 'patient' || !currentSession.patientId) return;
+
+      try {
+        const profile = await getApiPatientById(currentSession.patientId);
+        if (!active || !profile) return;
+        const docId = String(profile.doctorId || profile.assignedDoctorId || profile.doctorEmail || '').trim();
+        const docName = String(profile.doctorName || profile.assignedDoctorName || profile.doctorContact?.name || '').trim();
+        const docEmail = String(profile.doctorEmail || profile.doctorContact?.email || (docId.includes('@') ? docId : '')).trim();
+        const docPhone = String(profile.doctorPhone || profile.doctorContact?.phone || '').trim();
+        const docSpecialty = String(profile.doctorSpecialty || profile.doctorContact?.specialty || '').trim();
+
+        if (docId || docName || docEmail) {
+          const formattedName = docName
+            ? (docName.toLowerCase().startsWith('dr.') ? docName : `Dr. ${docName}`)
+            : (docEmail ? `Dr. ${docEmail.split('@')[0]}` : 'Assigned Physician');
+
+          const updatedDoc = {
+            id: docId || docEmail || 'DOC-ASSIGNED',
+            doctorId: docId || docEmail,
+            email: docEmail,
+            name: formattedName,
+            doctorName: formattedName,
+            role: 'doctor',
+            title: docSpecialty || 'Attending Physician',
+            department: 'Cardiology & Intensive Ward 4B',
+            phone: docPhone || '+91 98765 43210',
+            extension: '401',
+            avatar: '/assets/doctor-command-center.png',
+            status: 'online',
+            isAssigned: true,
+          };
+          setDialerDefaultDoctor(updatedDoc);
+
+          setAuthSession({
+            ...currentSession,
+            doctorId: docId || docEmail,
+            doctorName: docName,
+            doctorEmail: docEmail,
+            doctorPhone: docPhone,
+            doctorSpecialty: docSpecialty,
+          });
+        }
+      } catch {
+        // Fallback gracefully
+      }
+    };
+
+    syncDoctorDetails();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // API: Open Dialer Modal
   const openDialer = useCallback((defaultDoctor = null) => {
-    if (defaultDoctor) {
+    if (defaultDoctor && defaultDoctor.name) {
       setDialerDefaultDoctor(defaultDoctor);
     } else {
       const currentSession = getAuthSession();
-      if (currentSession?.doctorName || currentSession?.doctorEmail || currentSession?.doctorId) {
-        const rawName = currentSession?.doctorName || (currentSession?.doctorEmail ? currentSession.doctorEmail.split('@')[0] : 'Assigned Physician');
-        setDialerDefaultDoctor({
-          id: currentSession?.doctorId || currentSession?.doctorEmail || 'DOC-ASSIGNED',
-          name: rawName.toLowerCase().startsWith('dr.') ? rawName : `Dr. ${rawName}`,
-          role: 'doctor',
-          title: currentSession?.doctorSpecialty || 'Attending Physician',
-          department: 'Cardiology & Intensive Ward 4B',
-          phone: currentSession?.doctorPhone || '+91 98765 43210',
-          extension: '401',
-          avatar: '/assets/doctor-command-center.png',
-          status: 'online',
-          isAssigned: true,
-        });
+      const resolved = getAssignedDoctorFromSession(currentSession);
+      if (resolved) {
+        setDialerDefaultDoctor(resolved);
       } else {
-        setDialerDefaultDoctor(HOSPITAL_PHYSICIANS[0]);
+        setDialerDefaultDoctor({
+          id: 'CARE-TRIAGE',
+          name: 'Hospital Tele-Triage Desk',
+          doctorName: 'Hospital Tele-Triage Desk',
+          role: 'doctor',
+          title: 'On-Duty Emergency Medical Staff',
+          department: 'Clinical Rapid Response & Telemetry Desk',
+          phone: '+91 98444 55667',
+          extension: '911',
+          avatar: '/assets/telemetry-hub-hero.png',
+          status: 'online',
+          isAssigned: false,
+        });
       }
     }
     setIsDialerOpen(true);
@@ -650,30 +731,38 @@ export function VideoCallProvider({ children }) {
     } else {
       // PATIENT INITIATES CALL TO ASSIGNED DOCTOR
       receiverRole = 'doctor';
-      receiverId = String(
+      const assignedDoc = getAssignedDoctorFromSession(currentSession);
+
+      const resolvedDocId = String(
         target?.doctorId ||
+        (target?.isAssigned ? (assignedDoc?.doctorId || assignedDoc?.id || currentSession?.doctorId || currentSession?.doctorEmail) : '') ||
         target?.id ||
         target?.email ||
         currentSession?.doctorId ||
         currentSession?.doctorEmail ||
+        assignedDoc?.id ||
         ''
       ).trim().toLowerCase();
 
-      receiverName = String(
+      const resolvedDocName = String(
         target?.doctorName ||
+        (target?.isAssigned ? (assignedDoc?.name || currentSession?.doctorName) : '') ||
         target?.name ||
         currentSession?.doctorName ||
+        assignedDoc?.name ||
         'Assigned Physician'
       ).trim();
 
-      if (!receiverId) {
+      if (!resolvedDocId) {
         toast.error('Cannot start call: No assigned doctor available.');
         stopMediaStream();
         return;
       }
 
-      doctorId = receiverId;
-      doctorName = receiverName;
+      receiverId = resolvedDocId;
+      receiverName = resolvedDocName;
+      doctorId = resolvedDocId;
+      doctorName = resolvedDocName;
       patientId = currentUserId;
       patientName = currentUserName;
     }
