@@ -5294,20 +5294,58 @@ latest_data = {
 def esp32_update():
     global latest_data
 
-    payload = request.get_json(force=True)
+    payload = request.get_json(force=True, silent=True) or {}
+
+    heart_rate = float(payload.get("heartRate") if payload.get("heartRate") is not None else payload.get("heart_rate", payload.get("bpm", 0)))
+    spo2 = float(payload.get("spo2") if payload.get("spo2") is not None else payload.get("spO2", payload.get("SpO2", 0)))
+    temperature = float(payload.get("temperature") if payload.get("temperature") is not None else payload.get("temp", payload.get("temperatureC", 0)))
+    ecg = int(payload.get("ecg") if payload.get("ecg") is not None else payload.get("ecgValue", 0))
+    leads_off = bool(payload.get("leadsOff") if payload.get("leadsOff") is not None else payload.get("leadOff", False))
+    patient_id = str(payload.get("patientId") or payload.get("patient_id") or "").strip()
+
+    now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     latest_data = {
-        "heartRate": float(payload.get("heartRate", 0)),
-        "spo2": float(payload.get("spo2", 0)),
-        "temperature": float(payload.get("temperature", 0)),
-        "ecg": int(payload.get("ecg", 0)),
-        "leadsOff": bool(payload.get("leadsOff", True))
+        "heartRate": heart_rate,
+        "spo2": spo2,
+        "temperature": temperature,
+        "ecg": ecg,
+        "leadsOff": leads_off,
+        "patientId": patient_id,
+        "updatedAt": now_iso,
     }
+
+    # Broadcast real-time sensor updates over Socket.IO to connected dashboards
+    socketio.emit("live_vitals_stream", latest_data)
+
+    if patient_id:
+        socketio.emit("vitals_update", {
+            "patientId": patient_id,
+            "vitals": {
+                "heartRate": heart_rate,
+                "spo2": spo2,
+                "temperature": temperature,
+                "ecg": ecg,
+                "leadsOff": leads_off,
+            },
+            "timestamp": now_iso,
+        }, to=_patient_room(patient_id))
+
+        try:
+            _patient_collection_reference().child(patient_id).child('vitals').update({
+                'heartRate': heart_rate,
+                'spo2': spo2,
+                'temperature': temperature,
+                'updatedAt': now_iso,
+            })
+        except Exception as e:
+            print(f"[ESP32] Error syncing RTDB: {e}")
 
     return jsonify({
         "status": "received",
         "data": latest_data
     })
+
 
 @app.route("/api/live-vitals", methods=["GET"])
 def live_vitals():
