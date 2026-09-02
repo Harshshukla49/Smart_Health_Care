@@ -2274,12 +2274,40 @@ def _chat_emit_presence(role, actor_id, online, sid=''):
 
 
 def _chat_emit_to_user(role, actor_id, event_name, payload):
-    user_key = _chat_presence_key(role, actor_id)
-    sessions = chat_user_connections.get(user_key) or set()
+    target_sessions = set()
+    role_clean = str(role or '').strip().lower()
+    actor_clean = str(actor_id or '').strip()
+
+    if not role_clean or not actor_clean:
+        return 0
+
+    keys = [
+        _chat_presence_key(role_clean, actor_clean),
+        f"{role_clean}:{actor_clean.lower()}",
+        f"user:{role_clean}:{actor_clean.lower()}",
+        f"user_{actor_clean.lower()}",
+    ]
+    if role_clean == 'doctor':
+        if '@' in actor_clean:
+            keys.append(f"doctor:{actor_clean.split('@')[0].lower()}")
+    for k in keys:
+        target_sessions.update(chat_user_connections.get(k) or set())
+
+    # Emit to individual rooms and direct socket SIDs
+    try:
+        socketio.emit(event_name, payload, room=f"{role_clean}:{actor_clean.lower()}")
+        socketio.emit(event_name, payload, to=f"{role_clean}:{actor_clean.lower()}")
+    except Exception:
+        pass
+
     delivered = 0
-    for sid in sessions:
-        socketio.emit(event_name, payload, to=sid)
-        delivered += 1
+    for sid in target_sessions:
+        try:
+            socketio.emit(event_name, payload, room=sid)
+            socketio.emit(event_name, payload, to=sid)
+            delivered += 1
+        except Exception:
+            pass
     return delivered
 
 
@@ -4490,21 +4518,25 @@ def _register_socket_user(sid, actor):
         'name': str(actor.get('name') or '').strip(),
     }
     chat_user_connections.setdefault(user_key, set()).add(sid)
-    join_room(f"{role}:{actor_id.lower()}")
-    join_room(f"user:{role}:{actor_id.lower()}")
+    chat_user_connections.setdefault(f"{role}:{actor_id.lower()}", set()).add(sid)
+    chat_user_connections.setdefault(f"user_{actor_id.lower()}", set()).add(sid)
+
+    join_room(f"{role}:{actor_id.lower()}", sid=sid)
+    join_room(f"user:{role}:{actor_id.lower()}", sid=sid)
+    join_room(f"user_{actor_id.lower()}", sid=sid)
 
     if role == 'doctor':
-        join_room(f"doctor:{actor_id.lower()}")
+        join_room(f"doctor:{actor_id.lower()}", sid=sid)
         doc_email = str(actor.get('email') or '').strip().lower()
         if doc_email:
-            join_room(f"doctor:{doc_email}")
+            join_room(f"doctor:{doc_email}", sid=sid)
             chat_user_connections.setdefault(f"doctor:{doc_email}", set()).add(sid)
         doc_id = str(actor.get('doctorId') or '').strip().lower()
         if doc_id:
-            join_room(f"doctor:{doc_id}")
+            join_room(f"doctor:{doc_id}", sid=sid)
             chat_user_connections.setdefault(f"doctor:{doc_id}", set()).add(sid)
     elif role == 'patient':
-        join_room(f"patient:{actor_id.lower()}")
+        join_room(f"patient:{actor_id.lower()}", sid=sid)
         chat_user_connections.setdefault(f"patient:{actor_id.lower()}", set()).add(sid)
 
     _chat_emit_presence(role, actor_id, True, sid=sid)
@@ -4968,13 +5000,23 @@ def on_call_request(data):
         print(f"[CALL] Error writing call to RTDB: {e}")
 
     # Emit incoming call directly to the receiver's room and active sockets
+    delivered_count = _chat_emit_to_user(receiver_role, receiver_id, 'call:incoming', call_payload)
+    print(f"[WEBRTC-CALL] Incoming call dispatch: caller={caller_role}:{caller_id} -> receiver={receiver_role}:{receiver_id}, delivered={delivered_count}, sessions={list(receiver_sessions)}")
+
     if receiver_role == 'patient':
+        socketio.emit('call:incoming', call_payload, room=f"patient:{patient_id.lower()}")
         socketio.emit('call:incoming', call_payload, to=f"patient:{patient_id.lower()}")
         for s in receiver_sessions:
+            socketio.emit('call:incoming', call_payload, room=s)
             socketio.emit('call:incoming', call_payload, to=s)
     else:
+        socketio.emit('call:incoming', call_payload, room=f"doctor:{doctor_id.lower()}")
         socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.lower()}")
+        if '@' in doctor_id:
+            socketio.emit('call:incoming', call_payload, room=f"doctor:{doctor_id.split('@')[0].lower()}")
+            socketio.emit('call:incoming', call_payload, to=f"doctor:{doctor_id.split('@')[0].lower()}")
         for s in receiver_sessions:
+            socketio.emit('call:incoming', call_payload, room=s)
             socketio.emit('call:incoming', call_payload, to=s)
 
     # Emit ringing confirmation back to caller

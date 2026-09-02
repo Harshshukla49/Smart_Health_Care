@@ -113,13 +113,28 @@ export const getAssignedDoctorFromSession = (session) => {
 };
 
 export function VideoCallProvider({ children }) {
-  const session = getAuthSession();
+  const [session, setSession] = useState(() => getAuthSession());
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setSession(getAuthSession());
+    };
+    window.addEventListener('smart-health-auth-change', handleAuthChange);
+    window.addEventListener('storage', handleAuthChange);
+    return () => {
+      window.removeEventListener('smart-health-auth-change', handleAuthChange);
+      window.removeEventListener('storage', handleAuthChange);
+    };
+  }, []);
+
   const userRole = normalizeRole(session?.role);
   const isDoctor = userRole === 'doctor';
   const currentUserId = isDoctor
-    ? (session?.doctorId || session?.email || '')
-    : (session?.patientId || '');
+    ? String(session?.doctorId || session?.email || '').trim()
+    : String(session?.patientId || '').trim();
+  const currentUserEmail = String(session?.email || '').trim().lower();
   const currentUserName = session?.name || (isDoctor ? 'Doctor' : 'Patient');
+  const authToken = String(session?.token || '').trim();
 
   // Modal & Call States - Dynamically initialized from the authenticated patient's assigned doctor
   const [isDialerOpen, setIsDialerOpen] = useState(false);
@@ -146,6 +161,11 @@ export function VideoCallProvider({ children }) {
   const ringtoneTimerRef = useRef(null);
   const callTimerRef = useRef(null);
   const callTimeoutRef = useRef(null);
+  const activeCallRef = useRef(null);
+
+  useEffect(() => {
+    activeCallRef.current = activeCall;
+  }, [activeCall]);
 
   // Synthesize Realistic Clinical Phone Ringtone via Web Audio API
   const startRingtone = useCallback(() => {
@@ -324,19 +344,39 @@ export function VideoCallProvider({ children }) {
     iceCandidateQueueRef.current = [];
   }, []);
 
+  // Keep latest function refs to avoid socket disconnection churn
+  const createPeerConnectionRef = useRef(createPeerConnection);
+  createPeerConnectionRef.current = createPeerConnection;
+  const stopRingtoneRef = useRef(stopRingtone);
+  stopRingtoneRef.current = stopRingtone;
+  const startRingtoneRef = useRef(startRingtone);
+  startRingtoneRef.current = startRingtone;
+  const playConnectChimeRef = useRef(playConnectChime);
+  playConnectChimeRef.current = playConnectChime;
+  const stopMediaStreamRef = useRef(stopMediaStream);
+  stopMediaStreamRef.current = stopMediaStream;
+  const closePeerConnectionRef = useRef(closePeerConnection);
+  closePeerConnectionRef.current = closePeerConnection;
+
   // Persistent Authenticated Socket Connection
   useEffect(() => {
-    if (!session) return undefined;
+    if (!currentUserId) return undefined;
+
+    console.log('[WEBRTC-CALL] Initializing persistent Socket.IO connection for:', {
+      role: userRole,
+      id: currentUserId,
+      email: currentUserEmail,
+    });
 
     const socket = io(SOCKET_BASE_URL, {
       transports: ['websocket', 'polling'],
       auth: {
-        token: session?.token,
+        token: authToken,
         role: userRole,
-        doctorId: session?.doctorId || session?.email,
-        patientId: session?.patientId,
-        email: session?.email,
-        name: session?.name,
+        doctorId: isDoctor ? currentUserId : undefined,
+        patientId: !isDoctor ? currentUserId : undefined,
+        email: currentUserEmail,
+        name: currentUserName,
       },
       reconnection: true,
       reconnectionAttempts: Infinity,
@@ -347,33 +387,43 @@ export function VideoCallProvider({ children }) {
     socketRef.current = socket;
 
     socket.on('connect', () => {
+      console.log('[WEBRTC-CALL] Socket connected successfully. SID:', socket.id);
       socket.emit('call:register', {
         role: userRole,
-        doctorId: session?.doctorId || session?.email,
-        patientId: session?.patientId,
-        email: session?.email,
-        name: session?.name,
+        doctorId: isDoctor ? currentUserId : undefined,
+        patientId: !isDoctor ? currentUserId : undefined,
+        email: currentUserEmail,
+        name: currentUserName,
       });
+    });
+
+    socket.on('call:registered', (ack) => {
+      console.log('[WEBRTC-CALL] Socket call registration confirmed by backend:', ack);
     });
 
     // 1. Incoming Call Event (Received by targeted participant: Doctor or Patient)
     socket.on('call:incoming', (payload) => {
+      console.log('[WEBRTC-CALL] Incoming call event received:', payload);
       // Guard: Receiver should match current role
-      if (payload.receiverRole && payload.receiverRole !== userRole) return;
+      if (payload.receiverRole && payload.receiverRole !== userRole) {
+        console.warn('[WEBRTC-CALL] Incoming call intended for different role:', payload.receiverRole, 'vs current:', userRole);
+        return;
+      }
 
       setActiveCall(payload);
       setCallState('incoming');
-      startRingtone();
+      startRingtoneRef.current();
     });
 
     // 2. Call Accepted Event (Received by whichever party initiated the call)
     socket.on('call:accepted', async (payload) => {
+      console.log('[WEBRTC-CALL] Call accepted event received:', payload);
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
       }
-      stopRingtone();
-      playConnectChime();
+      stopRingtoneRef.current();
+      playConnectChimeRef.current();
       setCallState('connecting');
 
       // The caller initiates the WebRTC offer towards the counterparty
@@ -381,7 +431,7 @@ export function VideoCallProvider({ children }) {
       const targetRole = isDoctorCaller ? 'patient' : 'doctor';
       const targetId = isDoctorCaller ? payload.patientId : payload.doctorId;
 
-      const pc = createPeerConnection(payload.callId, targetRole, targetId);
+      const pc = createPeerConnectionRef.current(payload.callId, targetRole, targetId);
 
       try {
         const offer = await pc.createOffer({
@@ -406,13 +456,15 @@ export function VideoCallProvider({ children }) {
 
     // 3. WebRTC Offer (Received by the party that accepted the call)
     socket.on('webrtc:offer', async (payload) => {
+      console.log('[WEBRTC-CALL] WebRTC offer received:', payload);
       const isDoctorReceiver = userRole === 'doctor';
       const targetRole = isDoctorReceiver ? 'patient' : 'doctor';
+      const currentCall = activeCallRef.current;
       const targetId = isDoctorReceiver
-        ? (payload.fromId || activeCall?.patientId)
-        : (payload.fromId || activeCall?.doctorId);
+        ? (payload.fromId || currentCall?.patientId)
+        : (payload.fromId || currentCall?.doctorId);
 
-      const pc = createPeerConnection(payload.callId, targetRole, targetId);
+      const pc = createPeerConnectionRef.current(payload.callId, targetRole, targetId);
 
       try {
         await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
@@ -435,7 +487,7 @@ export function VideoCallProvider({ children }) {
           sdp: answer,
         });
 
-        playConnectChime();
+        playConnectChimeRef.current();
         setCallState('connecting');
       } catch (err) {
         console.error('[WEBRTC] Failed to process offer:', err);
@@ -444,6 +496,7 @@ export function VideoCallProvider({ children }) {
 
     // 4. WebRTC Answer (Received by the offerer)
     socket.on('webrtc:answer', async (payload) => {
+      console.log('[WEBRTC-CALL] WebRTC answer received:', payload);
       const pc = peerConnectionRef.current;
       if (pc) {
         try {
@@ -454,7 +507,6 @@ export function VideoCallProvider({ children }) {
             const cand = iceCandidateQueueRef.current.shift();
             await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
           }
-          // When ICE finishes, onconnectionstatechange will set 'connected'
           const connState = pc.connectionState;
           if (connState === 'connected') {
             setCallState('connected');
@@ -481,13 +533,14 @@ export function VideoCallProvider({ children }) {
 
     // 6. Call Rejected Event
     socket.on('call:rejected', (payload) => {
+      console.log('[WEBRTC-CALL] Call rejected event received:', payload);
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
       }
-      stopRingtone();
-      stopMediaStream();
-      closePeerConnection();
+      stopRingtoneRef.current();
+      stopMediaStreamRef.current();
+      closePeerConnectionRef.current();
       setCallState('rejected');
       const partnerName = isDoctor ? 'Patient' : 'Doctor';
       toast.error(payload?.reason || `${partnerName} declined or is currently unavailable.`);
@@ -499,13 +552,14 @@ export function VideoCallProvider({ children }) {
 
     // 7. Offline / Unavailable Event
     socket.on('call:unavailable', (payload) => {
+      console.log('[WEBRTC-CALL] Call unavailable event received:', payload);
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
       }
-      stopRingtone();
-      stopMediaStream();
-      closePeerConnection();
+      stopRingtoneRef.current();
+      stopMediaStreamRef.current();
+      closePeerConnectionRef.current();
       setCallState('unavailable');
       toast.error(payload?.message || 'Participant is currently offline or unavailable.');
       setTimeout(() => {
@@ -516,13 +570,14 @@ export function VideoCallProvider({ children }) {
 
     // 8. Busy Event
     socket.on('call:busy', (payload) => {
+      console.log('[WEBRTC-CALL] Call busy event received:', payload);
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
       }
-      stopRingtone();
-      stopMediaStream();
-      closePeerConnection();
+      stopRingtoneRef.current();
+      stopMediaStreamRef.current();
+      closePeerConnectionRef.current();
       setCallState('busy');
       toast.error(payload?.message || 'Participant is currently on another call.');
       setTimeout(() => {
@@ -532,10 +587,15 @@ export function VideoCallProvider({ children }) {
     });
 
     // 9. Call Ended Event
-    socket.on('call:ended', () => {
-      stopRingtone();
-      stopMediaStream();
-      closePeerConnection();
+    socket.on('call:ended', (payload) => {
+      console.log('[WEBRTC-CALL] Call ended event received:', payload);
+      if (callTimeoutRef.current) {
+        clearTimeout(callTimeoutRef.current);
+        callTimeoutRef.current = null;
+      }
+      stopRingtoneRef.current();
+      stopMediaStreamRef.current();
+      closePeerConnectionRef.current();
       setCallState('ended');
       toast('Video consultation concluded.', { icon: 'ℹ️' });
       setTimeout(() => {
@@ -547,34 +607,25 @@ export function VideoCallProvider({ children }) {
 
     // 10. Call Error Event
     socket.on('call:error', (payload) => {
+      console.error('[WEBRTC-CALL] Call error event received:', payload);
       if (callTimeoutRef.current) {
         clearTimeout(callTimeoutRef.current);
         callTimeoutRef.current = null;
       }
-      stopRingtone();
-      stopMediaStream();
-      closePeerConnection();
+      stopRingtoneRef.current();
+      stopMediaStreamRef.current();
+      closePeerConnectionRef.current();
       setCallState('idle');
       setActiveCall(null);
       toast.error(payload?.message || 'Call signaling error occurred.');
     });
 
     return () => {
+      console.log('[WEBRTC-CALL] Disconnecting socket for:', currentUserId);
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [
-    createPeerConnection,
-    closePeerConnection,
-    currentUserId,
-    isDoctor,
-    playConnectChime,
-    session,
-    startRingtone,
-    stopMediaStream,
-    stopRingtone,
-    userRole,
-  ]);
+  }, [authToken, currentUserEmail, currentUserId, currentUserName, isDoctor, userRole]);
 
   // Call duration counter
   useEffect(() => {

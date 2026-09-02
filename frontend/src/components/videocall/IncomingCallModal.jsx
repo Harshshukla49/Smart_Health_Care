@@ -34,8 +34,8 @@ export function IncomingCallModal() {
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-md animate-fadeIn">
-      <div className="relative w-full max-w-md rounded-[22px] bg-white border-2 border-emerald-400/80 shadow-[0_25px_60px_rgba(16,185,129,0.25)] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
+      <div className="relative w-full max-w-md rounded-[22px] bg-white border-2 border-emerald-400/90 shadow-[0_25px_60px_rgba(16,185,129,0.35)] overflow-hidden flex flex-col">
         {/* Pulsing Beacon Header */}
         <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-sky-600 px-5 py-4 text-white text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,255,255,0.25),_transparent)]" />

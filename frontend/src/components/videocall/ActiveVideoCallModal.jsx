@@ -51,7 +51,7 @@ export function ActiveVideoCallModal() {
     }
   }, [remoteStream, callState]);
 
-  if (callState !== 'calling' && callState !== 'connected' && callState !== 'ended') {
+  if (callState !== 'calling' && callState !== 'connecting' && callState !== 'connected' && callState !== 'ended') {
     return null;
   }
 
@@ -76,7 +76,7 @@ export function ActiveVideoCallModal() {
   // =========================================================================
   if (callState === 'calling') {
     return (
-      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-md animate-fadeIn">
+      <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-md animate-fadeIn">
         <div className="relative w-full max-w-md rounded-[24px] bg-white border border-[#E2E8F0] shadow-[0_25px_60px_rgba(15,23,42,0.25)] overflow-hidden flex flex-col p-6 text-center space-y-6">
           {/* Top Status */}
           <div className="flex items-center justify-center gap-2">
@@ -151,7 +151,7 @@ export function ActiveVideoCallModal() {
   // STATE 2: ACTIVE CONNECTED VIDEO CONSULTATION ROOM
   // =========================================================================
   return (
-    <div className="fixed inset-0 z-[120] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
+    <div className="fixed inset-0 z-[99999] flex items-center justify-center p-2 sm:p-4 md:p-6 bg-slate-950/85 backdrop-blur-md animate-fadeIn">
       <div className="relative w-full max-w-5xl h-[88vh] rounded-[24px] bg-slate-900 border border-slate-700 shadow-2xl overflow-hidden flex flex-col">
         {/* Call Header Bar */}
         <div className="flex items-center justify-between px-5 py-3.5 bg-slate-900/90 border-b border-slate-800 text-white shrink-0 z-20">
