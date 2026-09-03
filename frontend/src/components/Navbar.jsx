@@ -23,7 +23,7 @@ export function Navbar() {
 
   const handleLogout = () => {
     clearAuthSession();
-    toast.success('Logged out successfully');
+    toast.dismiss();
     navigate('/login', { replace: true });
   };
 

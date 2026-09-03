@@ -29,6 +29,10 @@ export function PatientLogin() {
   const [error, setError] = useState('');
   const [heroImgLoaded, setHeroImgLoaded] = useState(true);
 
+  React.useEffect(() => {
+    toast.dismiss();
+  }, []);
+
   const handleSubmit = async (event) => {
     event.preventDefault();
     setLoading(true);

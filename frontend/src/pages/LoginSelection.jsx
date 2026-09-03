@@ -17,6 +17,7 @@ import {
   Users,
   Zap,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { useI18n } from '../context/I18nContext';
 import { LanguageSwitcher } from '../components/LanguageSwitcher';
 
@@ -25,6 +26,10 @@ export function LoginSelection() {
   const [heroImgLoaded, setHeroImgLoaded] = useState(true);
   const [patientImgLoaded, setPatientImgLoaded] = useState(true);
   const [doctorImgLoaded, setDoctorImgLoaded] = useState(true);
+
+  React.useEffect(() => {
+    toast.dismiss();
+  }, []);
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#F5F9FF] text-[#0F2747] font-sans antialiased selection:bg-sky-100 selection:text-sky-900">

@@ -30,6 +30,10 @@ export function DoctorLogin() {
   const [error, setError] = useState('');
   const [heroImgLoaded, setHeroImgLoaded] = useState(true);
 
+  React.useEffect(() => {
+    toast.dismiss();
+  }, []);
+
   const emailPattern = useMemo(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/, []);
 
   const handleSubmit = async (event) => {
