@@ -54,8 +54,15 @@ import { ClinicalReportSection } from '../components/ClinicalReportSection';
 import { LiveVitalsProvider, useLiveVitals } from '../context/LiveVitalsContext';
 import { EmergencyProvider, useEmergency } from '../context/EmergencyContext';
 import { useVideoCall } from '../context/VideoCallContext';
-import { useI18n } from '../context/I18nContext';
-import { getApiPatientById, getPatients, updateDoctorProfile, updatePatientProfile } from '../services/api';
+import {
+  connectPatientDevice,
+  disconnectPatientDevice,
+  getApiPatientById,
+  getDoctorDevices,
+  getPatients,
+  updateDoctorProfile,
+  updatePatientProfile,
+} from '../services/api';
 import { getAuthSession, setAuthSession } from '../utils/auth';
 import { LocationStatusCard } from '../components/emergency/LocationStatusCard';
 import { LocationConsentModal } from '../components/emergency/LocationConsentModal';
@@ -123,6 +130,65 @@ function DashboardBody({ liveVitals }) {
   const [patientAge, setPatientAge] = useState(session?.age || 24);
   const [patientGender, setPatientGender] = useState(session?.gender || 'Male');
   const [showLocationMapModal, setShowLocationMapModal] = useState(false);
+  const [deviceModalPatient, setDeviceModalPatient] = useState(null);
+  const [deviceInputId, setDeviceInputId] = useState('DEVICE-001');
+  const [deviceConnecting, setDeviceConnecting] = useState(false);
+  const [reassignPrompt, setReassignPrompt] = useState(null);
+
+  const handleOpenDeviceModal = (pt) => {
+    setDeviceModalPatient(pt);
+    setDeviceInputId(pt.deviceId || 'DEVICE-001');
+    setReassignPrompt(null);
+  };
+
+  const handleConnectDevice = async (force = false) => {
+    if (!deviceModalPatient || !deviceInputId.trim()) {
+      toast.error('Device ID is required');
+      return;
+    }
+
+    setDeviceConnecting(true);
+    try {
+      const res = await connectPatientDevice({
+        patientId: deviceModalPatient.id,
+        deviceId: deviceInputId.trim(),
+        forceReassign: force,
+      });
+
+      if (res?.status === 'reassignment_required') {
+        setReassignPrompt(res);
+        return;
+      }
+
+      toast.success(res?.message || `Device ${deviceInputId} connected successfully`);
+      setDeviceModalPatient(null);
+      setReassignPrompt(null);
+
+      const updated = await getPatients();
+      if (Array.isArray(updated)) {
+        setDoctorPatients(updated);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to connect device');
+    } finally {
+      setDeviceConnecting(false);
+    }
+  };
+
+  const handleDisconnectDevice = async (ptId) => {
+    try {
+      await disconnectPatientDevice(ptId);
+      toast.success('Device disconnected successfully');
+      setDeviceModalPatient(null);
+      setReassignPrompt(null);
+      const updated = await getPatients();
+      if (Array.isArray(updated)) {
+        setDoctorPatients(updated);
+      }
+    } catch (err) {
+      toast.error(err?.response?.data?.message || err?.message || 'Failed to disconnect device');
+    }
+  };
 
   // SECURITY FIX: Real assigned patient count without synthetic fallback
   const patientCount = doctorPatients.length;
@@ -1135,6 +1201,7 @@ function DashboardBody({ liveVitals }) {
                       <tr>
                         <th className="px-5 py-4">Patient</th>
                         <th className="px-5 py-4">ID</th>
+                        <th className="px-5 py-4">Device</th>
                         <th className="px-5 py-4">Heart Rate</th>
                         <th className="px-5 py-4">SpO2</th>
                         <th className="px-5 py-4">Temperature</th>
@@ -1185,6 +1252,16 @@ function DashboardBody({ liveVitals }) {
                                 </div>
                               </td>
                               <td className="px-5 py-3.5 text-[#64748B] font-mono text-xs">{pt.id}</td>
+                              <td className="px-5 py-3.5">
+                                {pt.deviceId ? (
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-700">
+                                    <Radio className={`h-3 w-3 ${pt.deviceConnected ? 'text-emerald-500 animate-pulse' : 'text-slate-400'}`} />
+                                    <span>{pt.deviceId}</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">No device</span>
+                                )}
+                              </td>
                               <td className="px-5 py-3.5 font-semibold text-[#0F172A]">
                                 <span className="flex items-center gap-1.5">
                                   <HeartPulse className="h-3.5 w-3.5 text-rose-500" />
@@ -1217,6 +1294,18 @@ function DashboardBody({ liveVitals }) {
                               </td>
                               <td className="px-5 py-3.5 text-right">
                                 <div className="flex items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenDeviceModal(pt);
+                                    }}
+                                    className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-700 hover:bg-sky-100 transition shadow-2xs"
+                                    title={`Connect or manage hardware device for ${pt.name || 'Patient'}`}
+                                  >
+                                    <Radio className="h-3.5 w-3.5 text-sky-600" />
+                                    <span>{pt.deviceId ? 'Device' : 'Connect'}</span>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={(e) => {
@@ -1709,6 +1798,135 @@ function DashboardBody({ liveVitals }) {
                 Close Map
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hardware Device Connection & Reassignment Modal */}
+      {deviceModalPatient && (
+        <div className="fixed inset-0 z-[9995] grid place-items-center bg-slate-900/60 p-4 backdrop-blur-xs">
+          <div className="relative w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
+              <h3 className="font-sans text-lg font-bold text-slate-900 flex items-center gap-2">
+                <Radio className="h-5 w-5 text-sky-600" />
+                <span>Connect Telemetry Device</span>
+              </h3>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeviceModalPatient(null);
+                  setReassignPrompt(null);
+                }}
+                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 transition"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Patient Context Banner */}
+            <div className="mb-4 rounded-2xl border border-sky-100 bg-sky-50/60 p-3.5 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-500">Target Patient</p>
+                <p className="text-sm font-bold text-slate-900">{deviceModalPatient.name || 'Patient'}</p>
+              </div>
+              <span className="font-mono text-xs font-semibold bg-white border border-sky-200 text-sky-700 px-2.5 py-1 rounded-lg">
+                {deviceModalPatient.id}
+              </span>
+            </div>
+
+            {/* Reassignment Warning Box if conflict */}
+            {reassignPrompt ? (
+              <div className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle className="h-5 w-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900">Device Already Connected</h4>
+                    <p className="mt-1 text-xs text-amber-800 leading-relaxed">
+                      {reassignPrompt.message ||
+                        `Device ${deviceInputId} is currently assigned to another patient (${reassignPrompt.currentPatientId || 'Other'}). Are you sure you want to reassign it?`}
+                    </p>
+                    <div className="mt-4 flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        onClick={() => handleConnectDevice(true)}
+                        disabled={deviceConnecting}
+                        className="bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold"
+                      >
+                        {deviceConnecting ? 'Reassigning...' : 'Confirm Reassign'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => setReassignPrompt(null)}
+                        className="rounded-xl text-xs"
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      Hardware Device ID
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        value={deviceInputId}
+                        onChange={(e) => setDeviceInputId(e.target.value.toUpperCase())}
+                        placeholder="e.g. DEVICE-001"
+                        className="w-full rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm font-mono font-semibold text-slate-900 uppercase focus:border-sky-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-100"
+                      />
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-slate-500">
+                      Standard IDs: <span className="font-mono font-semibold text-sky-700 cursor-pointer hover:underline" onClick={() => setDeviceInputId('DEVICE-001')}>DEVICE-001</span>, <span className="font-mono font-semibold text-sky-700 cursor-pointer hover:underline" onClick={() => setDeviceInputId('DEVICE-002')}>DEVICE-002</span>. The ESP32 will immediately stream live telemetry to this patient.
+                    </p>
+                  </div>
+
+                  {deviceModalPatient.deviceId && (
+                    <div className="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50 p-2.5">
+                      <div className="flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                        <span className="text-xs text-slate-600">Currently linked: <strong className="font-mono text-slate-800">{deviceModalPatient.deviceId}</strong></span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleDisconnectDevice(deviceModalPatient.id)}
+                        className="text-xs font-semibold text-rose-600 hover:text-rose-700 hover:underline"
+                      >
+                        Unlink Device
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-6 flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => {
+                      setDeviceModalPatient(null);
+                      setReassignPrompt(null);
+                    }}
+                    className="rounded-xl text-xs"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => handleConnectDevice(false)}
+                    disabled={deviceConnecting || !deviceInputId.trim()}
+                    className="rounded-xl text-xs bg-sky-600 hover:bg-sky-700 text-white font-semibold"
+                  >
+                    {deviceConnecting ? 'Connecting...' : 'Connect Device'}
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

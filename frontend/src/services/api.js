@@ -499,13 +499,48 @@ export const getApiPatientById = async (patientId) => {
   return unwrapEnvelope(response) || null;
 };
 
-export const connectPatientDevice = async (patientId) => {
-  const response = await api.post(`/connect-device/${encodeURIComponent(patientId)}`);
+export const connectPatientDevice = async (arg, deviceId = '', forceReassign = false) => {
+  let pid = '';
+  let did = '';
+  let force = false;
+  let name = '';
+
+  if (typeof arg === 'object' && arg !== null) {
+    pid = arg.patientId || '';
+    did = arg.deviceId || '';
+    force = Boolean(arg.forceReassign);
+    name = arg.name || '';
+  } else {
+    pid = arg || '';
+    did = deviceId || '';
+    force = Boolean(forceReassign);
+  }
+
+  const response = await api.post('/api/devices/connect', {
+    patientId: toText(pid),
+    deviceId: toText(did) || undefined,
+    forceReassign: force,
+    name: toText(name) || undefined,
+  });
   return unwrapEnvelope(response) || null;
 };
 
-export const disconnectPatientDevice = async (patientId) => {
-  const response = await api.post(`/disconnect-device/${encodeURIComponent(patientId)}`);
+export const disconnectPatientDevice = async (arg, deviceId = '') => {
+  let pid = '';
+  let did = '';
+
+  if (typeof arg === 'object' && arg !== null) {
+    pid = arg.patientId || '';
+    did = arg.deviceId || '';
+  } else {
+    pid = arg || '';
+    did = deviceId || '';
+  }
+
+  const response = await api.post('/api/devices/disconnect', {
+    patientId: toText(pid),
+    deviceId: toText(did) || undefined,
+  });
   return unwrapEnvelope(response) || null;
 };
 
@@ -816,4 +851,22 @@ export const getAiAssessment = async (patientId) => {
   const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/ai-assessment`);
   return unwrapEnvelope(response);
 };
+
+/**
+ * Get device mapping and telemetry status for a patient
+ */
+export const getPatientDeviceDetails = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/device`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Get all registered doctor devices with live online/offline status
+ */
+export const getDoctorDevices = async () => {
+  const response = await api.get('/api/devices/list');
+  const data = unwrapEnvelope(response);
+  return Array.isArray(data?.devices) ? data.devices : [];
+};
+
 

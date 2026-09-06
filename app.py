@@ -2649,7 +2649,8 @@ def _normalize_patient_record(patient_id, payload, existing_record=None):
         'ecgData': ecg_data,
         'status': prediction.get('status', 'unavailable'),
         'prediction': prediction,
-        'predictionConfidence': prediction.get('confidence', 0.0),
+        'deviceId': payload.get('deviceId') or (existing_record or {}).get('deviceId') or None,
+        'deviceActive': bool(payload.get('deviceActive', (existing_record or {}).get('deviceActive', False))),
         'deviceConnected': bool(payload.get('deviceConnected', (existing_record or {}).get('deviceConnected', False))),
         'dataSource': payload.get('dataSource') or (existing_record or {}).get('dataSource') or 'dataset',
         'updatedAt': payload.get('updatedAt') or datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -3519,6 +3520,7 @@ def add_patient_legacy():
                 'message': 'JSON body is required.'
             }), 400
 
+        desired_device_id = str(data.get('deviceId') or data.get('device_id') or '').strip()
         payload = {
             'name': data.get('name'),
             'age': data.get('age') or data.get('Age'),
@@ -3527,6 +3529,8 @@ def add_patient_legacy():
             'email': data.get('email'),
             'symptoms': data.get('symptoms'),
             'notes': data.get('notes') or '',
+            'deviceId': desired_device_id if desired_device_id else None,
+            'deviceActive': bool(desired_device_id),
             'deviceConnected': False,
             'dataSource': 'dataset',
             'createdAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
@@ -3619,6 +3623,55 @@ def add_patient_legacy():
         record = _write_patient_record(patient_id, payload)
         response_patient = _sanitize_patient_response(record)
 
+        device_info = None
+        if desired_device_id:
+            try:
+                existing_dev = _devices_collection_reference().child(desired_device_id).get()
+                now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                if isinstance(existing_dev, dict):
+                    old_patient = str(existing_dev.get('patientId') or '').strip()
+                    if old_patient and old_patient != patient_id:
+                        try:
+                            _patient_collection_reference().child(old_patient).update({
+                                'deviceId': None,
+                                'deviceActive': False,
+                                'deviceConnected': False,
+                            })
+                        except Exception:
+                            pass
+                    _devices_collection_reference().child(desired_device_id).update({
+                        'patientId': patient_id,
+                        'assignedDoctorId': doctor_id,
+                        'active': True,
+                    })
+                    device_info = {
+                        'deviceId': desired_device_id,
+                        'linked': True,
+                    }
+                else:
+                    raw_token = f"tok_{secrets.token_hex(16)}"
+                    token_hash = _hash_device_token(raw_token)
+                    dev_payload = {
+                        'deviceId': desired_device_id,
+                        'patientId': patient_id,
+                        'assignedDoctorId': doctor_id,
+                        'tokenHash': token_hash,
+                        'name': f"ESP32-{desired_device_id}",
+                        'firmwareVersion': '1.0.0',
+                        'active': True,
+                        'createdAt': now_iso,
+                        'lastSeen': None,
+                        'registeredBy': 'doctor',
+                    }
+                    _devices_collection_reference().child(desired_device_id).set(dev_payload)
+                    device_info = {
+                        'deviceId': desired_device_id,
+                        'deviceToken': raw_token,
+                        'linked': True,
+                    }
+            except Exception as dev_err:
+                print(f"[Auto-Device-Map] Error mapping device {desired_device_id}: {dev_err}")
+
         return jsonify({
             'status': 'success',
             'message': 'Patient created successfully.',
@@ -3627,6 +3680,7 @@ def add_patient_legacy():
                 'patientId': patient_id,
                 'password': generated_password,
             },
+            'device': device_info,
         })
     except Exception as error:
         return jsonify({
@@ -5726,6 +5780,238 @@ def get_patient_device(patient_id):
         safe_record.pop('tokenHash', None)
         safe_record['linked'] = True
         return api_success('Device details fetched successfully.', safe_record)
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/devices/connect', methods=['POST'])
+@require_auth(roles={'doctor', 'admin', 'patient'})
+def connect_patient_device():
+    try:
+        data = request.get_json(silent=True) or {}
+        device_id = str(data.get('deviceId') or '').strip()
+        patient_id = str(data.get('patientId') or '').strip()
+        force_reassign = bool(data.get('forceReassign', False))
+        device_name = str(data.get('name') or f"ESP32-{device_id}").strip()
+
+        if not device_id:
+            return api_error('deviceId is required.', 400)
+        if not patient_id:
+            return api_error('patientId is required.', 400)
+
+        patient_record = _patient_collection_reference().child(patient_id).get()
+        if not isinstance(patient_record, dict):
+            return api_error('Patient record not found.', 404)
+
+        user_role = _request_user_role()
+        doctor_id = _request_doctor_id() if user_role == 'doctor' else None
+        if user_role == 'patient':
+            req_patient_id = _request_patient_id()
+            if not req_patient_id or req_patient_id != patient_id:
+                return api_error('Access denied for this patient record.', 403)
+        elif user_role == 'doctor' and not _doctor_owns_record(patient_record, doctor_id):
+            return api_error('Access denied for this patient record.', 403)
+
+        new_patient_name = str(patient_record.get('name') or patient_id).strip()
+
+        # Check existing device mapping in registry
+        existing_device = _devices_collection_reference().child(device_id).get()
+        now_iso = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+        if isinstance(existing_device, dict):
+            current_linked_patient = str(existing_device.get('patientId') or '').strip()
+            if current_linked_patient and current_linked_patient != patient_id:
+                if not force_reassign:
+                    prev_rec = _patient_collection_reference().child(current_linked_patient).get() or {}
+                    prev_name = str(prev_rec.get('name') or current_linked_patient).strip()
+                    return jsonify({
+                        'status': 'reassignment_required',
+                        'message': f"Device '{device_id}' is currently connected to {prev_name} ({current_linked_patient}). Are you sure you want to reconnect it to {new_patient_name}?",
+                        'currentLinkedPatient': current_linked_patient,
+                        'currentLinkedPatientName': prev_name,
+                        'targetPatientId': patient_id,
+                        'targetPatientName': new_patient_name,
+                        'deviceId': device_id,
+                    }), 200
+
+                # Unlink from previous patient
+                try:
+                    _patient_collection_reference().child(current_linked_patient).update({
+                        'deviceId': None,
+                        'deviceActive': False,
+                        'deviceConnected': False,
+                    })
+                    socketio.emit('device_status_update', {
+                        'patientId': current_linked_patient,
+                        'deviceConnected': False,
+                        'deviceId': None,
+                        'dataSource': 'dataset',
+                    }, to=_patient_room(current_linked_patient))
+                except Exception:
+                    pass
+
+            _devices_collection_reference().child(device_id).update({
+                'patientId': patient_id,
+                'assignedDoctorId': doctor_id,
+                'active': True,
+                'name': device_name,
+            })
+            raw_token = None
+        else:
+            # Device newly registered
+            raw_token = f"tok_{secrets.token_hex(16)}"
+            token_hash = _hash_device_token(raw_token)
+            device_payload = {
+                'deviceId': device_id,
+                'patientId': patient_id,
+                'assignedDoctorId': doctor_id,
+                'tokenHash': token_hash,
+                'name': device_name,
+                'firmwareVersion': '1.0.0',
+                'active': True,
+                'createdAt': now_iso,
+                'lastSeen': None,
+                'registeredBy': _request_user_role(),
+            }
+            _devices_collection_reference().child(device_id).set(device_payload)
+
+        # Update target patient
+        _patient_collection_reference().child(patient_id).update({
+            'deviceId': device_id,
+            'deviceActive': True,
+            'deviceConnected': True,
+            'dataSource': 'esp32-hardware',
+        })
+
+        socketio.emit('device_status_update', {
+            'patientId': patient_id,
+            'deviceConnected': True,
+            'deviceId': device_id,
+            'dataSource': 'esp32-hardware',
+        }, to=_patient_room(patient_id))
+
+        res_data = {
+            'deviceId': device_id,
+            'patientId': patient_id,
+            'patientName': new_patient_name,
+            'linked': True,
+            'active': True,
+            'updatedAt': now_iso,
+        }
+        if raw_token:
+            res_data['deviceToken'] = raw_token
+
+        return api_success(f"Device '{device_id}' connected to {new_patient_name} successfully.", res_data)
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/devices/disconnect', methods=['POST'])
+@require_auth(roles={'doctor', 'admin', 'patient'})
+def disconnect_patient_device():
+    try:
+        data = request.get_json(silent=True) or {}
+        patient_id = str(data.get('patientId') or '').strip()
+        device_id = str(data.get('deviceId') or '').strip()
+
+        if not patient_id and not device_id:
+            return api_error('patientId or deviceId is required.', 400)
+
+        if patient_id:
+            patient_record = _patient_collection_reference().child(patient_id).get()
+            if isinstance(patient_record, dict):
+                user_role = _request_user_role()
+                doctor_id = _request_doctor_id() if user_role == 'doctor' else None
+                if user_role == 'patient':
+                    req_patient_id = _request_patient_id()
+                    if not req_patient_id or req_patient_id != patient_id:
+                        return api_error('Access denied for this patient record.', 403)
+                elif user_role == 'doctor' and not _doctor_owns_record(patient_record, doctor_id):
+                    return api_error('Access denied for this patient record.', 403)
+                device_id = str(patient_record.get('deviceId') or device_id).strip()
+
+                _patient_collection_reference().child(patient_id).update({
+                    'deviceId': None,
+                    'deviceActive': False,
+                    'deviceConnected': False,
+                    'dataSource': 'dataset',
+                })
+                socketio.emit('device_status_update', {
+                    'patientId': patient_id,
+                    'deviceConnected': False,
+                    'deviceId': None,
+                    'dataSource': 'dataset',
+                }, to=_patient_room(patient_id))
+
+        if device_id:
+            try:
+                _devices_collection_reference().child(device_id).update({
+                    'patientId': None,
+                    'active': False,
+                })
+            except Exception:
+                pass
+
+        return api_success('Device disconnected successfully.', {'patientId': patient_id, 'deviceId': device_id})
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/devices/list', methods=['GET'])
+@require_auth(roles={'doctor', 'admin'})
+def list_devices():
+    try:
+        devices_raw = _devices_collection_reference().get() or {}
+        if not isinstance(devices_raw, dict):
+            devices_raw = {}
+
+        now_timestamp = time.time()
+        result = []
+
+        for dev_id, dev_data in devices_raw.items():
+            if not isinstance(dev_data, dict):
+                continue
+
+            last_seen_str = str(dev_data.get('lastSeen') or '')
+            is_online = False
+            last_seen_seconds_ago = None
+
+            if last_seen_str:
+                try:
+                    last_seen_dt = datetime.strptime(last_seen_str, '%Y-%m-%d %H:%M:%S')
+                    last_seen_epoch = last_seen_dt.timestamp()
+                    last_seen_seconds_ago = max(0, int(now_timestamp - last_seen_epoch))
+                    # Online threshold: telemetry received within last 15 seconds
+                    is_online = last_seen_seconds_ago <= 15
+                except Exception:
+                    pass
+
+            linked_patient_id = str(dev_data.get('patientId') or '').strip()
+            linked_patient_name = ''
+            if linked_patient_id:
+                try:
+                    pt_rec = _patient_collection_reference().child(linked_patient_id).get()
+                    if isinstance(pt_rec, dict):
+                        linked_patient_name = str(pt_rec.get('name') or '').strip()
+                except Exception:
+                    pass
+
+            safe_item = {
+                'deviceId': dev_id,
+                'name': dev_data.get('name') or f"ESP32-{dev_id}",
+                'patientId': linked_patient_id if linked_patient_id else None,
+                'patientName': linked_patient_name,
+                'active': bool(dev_data.get('active', True)),
+                'online': is_online,
+                'status': 'ONLINE' if is_online else 'OFFLINE',
+                'lastSeen': last_seen_str,
+                'lastSeenSecondsAgo': last_seen_seconds_ago,
+                'firmwareVersion': dev_data.get('firmwareVersion') or '1.0.0',
+                'createdAt': dev_data.get('createdAt') or '',
+            }
+            result.append(safe_item)
+
+        return api_success('Devices fetched successfully.', {'devices': result})
     except Exception as err:
         return api_error(str(err), 500)
 

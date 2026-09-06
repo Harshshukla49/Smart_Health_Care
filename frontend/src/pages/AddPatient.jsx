@@ -17,6 +17,7 @@ const initialForm = {
   phone: '',
   email: '',
   symptoms: '',
+  deviceId: '',
   heartRate: '',
   spo2: '',
   temperature: '',
@@ -69,7 +70,11 @@ export function AddPatient() {
 
     try {
       const result = await createPatientAccount(formData);
-      setCredentials(result.credentials);
+      setCredentials({
+        ...result.credentials,
+        deviceId: result?.device?.deviceId || formData.deviceId || null,
+        deviceToken: result?.device?.deviceToken || null,
+      });
       setFormData(initialForm);
       toast.success('Patient Created Successfully');
     } catch (requestError) {
@@ -205,6 +210,7 @@ export function AddPatient() {
           <Field label="Heart Rate Baseline (BPM, Optional)" name="heartRate" type="number" value={formData.heartRate} onChange={handleChange} placeholder="72" required={false} />
           <Field label="SpO2 Baseline (%, Optional)" name="spo2" type="number" value={formData.spo2} onChange={handleChange} placeholder="98" required={false} />
           <Field label="Temperature Baseline (°C, Optional)" name="temperature" type="number" step="0.1" value={formData.temperature} onChange={handleChange} placeholder="36.7" required={false} />
+          <Field label="ESP32 Hardware Device ID (Optional)" name="deviceId" value={formData.deviceId} onChange={handleChange} placeholder="e.g. DEVICE-001" required={false} />
 
           <label className="space-y-1.5 sm:col-span-2">
             <span className="text-xs font-semibold text-slate-700">Initial ECG Waveform Samples (Comma-separated, Optional)</span>
@@ -269,6 +275,20 @@ export function AddPatient() {
                   value={credentials.password}
                   onCopy={() => copyText(credentials.password, 'Password')}
                 />
+                {credentials.deviceId ? (
+                  <CredentialRow
+                    label="Linked Hardware Device"
+                    value={credentials.deviceId}
+                    onCopy={() => copyText(credentials.deviceId, 'Device ID')}
+                  />
+                ) : null}
+                {credentials.deviceToken ? (
+                  <CredentialRow
+                    label="Hardware Auth Token"
+                    value={credentials.deviceToken}
+                    onCopy={() => copyText(credentials.deviceToken, 'Device Token')}
+                  />
+                ) : null}
               </div>
 
               <div className="mt-6 flex flex-wrap justify-end gap-2.5">
