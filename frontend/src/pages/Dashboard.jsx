@@ -54,6 +54,7 @@ import { ClinicalReportSection } from '../components/ClinicalReportSection';
 import { LiveVitalsProvider, useLiveVitals } from '../context/LiveVitalsContext';
 import { EmergencyProvider, useEmergency } from '../context/EmergencyContext';
 import { useVideoCall } from '../context/VideoCallContext';
+import { useI18n } from '../context/I18nContext';
 import {
   connectPatientDevice,
   disconnectPatientDevice,
