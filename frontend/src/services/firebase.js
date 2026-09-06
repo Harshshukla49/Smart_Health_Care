@@ -2,13 +2,13 @@ import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID,
-  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyCqlojCmA8TFc5iXqMXXA5PQ5p1fi8um7o',
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'smart-health-care-cd723.firebaseapp.com',
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'smart-health-care-cd723',
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'smart-health-care-cd723.firebasestorage.app',
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '607879480771',
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:607879480771:web:b4e19a21bf9be9b79e6976',
+  databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://smart-health-care-cd723-default-rtdb.asia-southeast1.firebasedatabase.app',
 };
 
 // Safe development-only configuration check (never exposes private credentials)
