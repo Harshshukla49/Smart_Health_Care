@@ -84,22 +84,24 @@ const appendAndTrim = (current, segment) => {
   return [...current, ...segment].slice(-ECG_MAX_POINTS);
 };
 
+const DEFAULT_VITALS = {
+  heartRate: 0,
+  spo2: 0,
+  temperature: 0,
+  updatedAt: '',
+  risk: '',
+  risk_score: undefined,
+  confidence: undefined,
+  alerts: [],
+  message: '',
+};
+
 export function LiveVitalsProvider({ children }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [patientId, setPatientId] = useState('');
   const [patientName, setPatientName] = useState('');
-  const [vitals, setVitals] = useState({
-    heartRate: 0,
-    spo2: 0,
-    temperature: 0,
-    updatedAt: '',
-    risk: '',
-    risk_score: undefined,
-    confidence: undefined,
-    alerts: [],
-    message: '',
-  });
+  const [vitals, setVitals] = useState(DEFAULT_VITALS);
   const [ecgData, setEcgData] = useState([]);
 
   const socketRef = useRef(null);
