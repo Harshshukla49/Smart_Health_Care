@@ -49,6 +49,12 @@
     "password_resets": {
       ".read": false,
       ".write": false
+    },
+    "devices": {
+      "$deviceId": {
+        ".read": "auth != null && (auth.uid === data.child('assignedDoctorId').val() || auth.token.email === data.child('assignedDoctorId').val() || auth.uid === data.child('patientId').val() || auth.token.email === data.child('patientEmail').val())",
+        ".write": false
+      }
     }
   }
 }

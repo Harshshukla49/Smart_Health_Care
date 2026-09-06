@@ -5784,6 +5784,7 @@ def get_patient_device(patient_id):
         return api_error(str(err), 500)
 
 
+@app.route('/api/doctor/connect-device', methods=['POST'])
 @app.route('/api/devices/connect', methods=['POST'])
 @require_auth(roles={'doctor', 'admin', 'patient'})
 def connect_patient_device():
@@ -5996,6 +5997,13 @@ def list_devices():
                 except Exception:
                     pass
 
+            if is_online:
+                dev_status = 'ONLINE'
+            elif linked_patient_id:
+                dev_status = 'OFFLINE'
+            else:
+                dev_status = 'AVAILABLE'
+
             safe_item = {
                 'deviceId': dev_id,
                 'name': dev_data.get('name') or f"ESP32-{dev_id}",
@@ -6003,7 +6011,7 @@ def list_devices():
                 'patientName': linked_patient_name,
                 'active': bool(dev_data.get('active', True)),
                 'online': is_online,
-                'status': 'ONLINE' if is_online else 'OFFLINE',
+                'status': dev_status,
                 'lastSeen': last_seen_str,
                 'lastSeenSecondsAgo': last_seen_seconds_ago,
                 'firmwareVersion': dev_data.get('firmwareVersion') or '1.0.0',
