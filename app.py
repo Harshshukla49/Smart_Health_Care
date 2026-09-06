@@ -5515,7 +5515,16 @@ def on_subscribe_patient(data):
 
 @app.route("/api/esp32/update", methods=["POST"])
 def esp32_update():
-    payload = request.get_json(force=True, silent=True) or {}
+    if request.data:
+        try:
+            payload = request.get_json(force=True, silent=False)
+        except Exception:
+            return jsonify({'status': 'error', 'message': 'Invalid JSON payload format.'}), 400
+    else:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        return jsonify({'status': 'error', 'message': 'JSON payload must be an object.'}), 400
 
     device_id = str(request.headers.get('X-Device-ID') or payload.get('deviceId') or '').strip()
     device_token = str(request.headers.get('X-Device-Token') or payload.get('deviceToken') or '').strip()
