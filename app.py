@@ -3174,12 +3174,42 @@ def update_patient_profile():
             'phone': new_phone,
             'updatedAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         }
-        if 'sosContactName' in data:
-            update_data['sosContactName'] = str(data.get('sosContactName') or '').strip()
-        if 'sosContactPhone' in data:
-            update_data['sosContactPhone'] = str(data.get('sosContactPhone') or '').strip()
-        if 'sosContactRelation' in data:
-            update_data['sosContactRelation'] = str(data.get('sosContactRelation') or 'Brother').strip()
+
+        # Multi-contact SOS management (up to 3 contacts)
+        if 'sosContacts' in data and isinstance(data.get('sosContacts'), list):
+            raw_contacts = data.get('sosContacts')[:3]
+            cleaned_contacts = []
+            for c in raw_contacts:
+                if isinstance(c, dict):
+                    c_name = str(c.get('name') or '').strip()
+                    c_phone = _normalize_phone(c.get('phone'))
+                    c_relation = str(c.get('relation') or 'Family').strip()
+                    # Filter out empty or mock names
+                    if (c_name or c_phone) and c_name != 'Rahul Soni':
+                        cleaned_contacts.append({
+                            'name': c_name,
+                            'phone': c_phone,
+                            'relation': c_relation,
+                        })
+            update_data['sosContacts'] = cleaned_contacts
+            if cleaned_contacts:
+                update_data['sosContactName'] = cleaned_contacts[0]['name']
+                update_data['sosContactPhone'] = cleaned_contacts[0]['phone']
+                update_data['sosContactRelation'] = cleaned_contacts[0]['relation']
+            else:
+                update_data['sosContactName'] = ''
+                update_data['sosContactPhone'] = ''
+                update_data['sosContactRelation'] = ''
+        else:
+            if 'sosContactName' in data:
+                val = str(data.get('sosContactName') or '').strip()
+                update_data['sosContactName'] = '' if val == 'Rahul Soni' else val
+            if 'sosContactPhone' in data:
+                val = _normalize_phone(data.get('sosContactPhone'))
+                update_data['sosContactPhone'] = '' if val == '+919876543210' else val
+            if 'sosContactRelation' in data:
+                update_data['sosContactRelation'] = str(data.get('sosContactRelation') or 'Family').strip()
+
         if 'locationSharingEnabled' in data:
             update_data['locationSharingEnabled'] = bool(data.get('locationSharingEnabled'))
         if 'emergencyLocationSharingEnabled' in data:
@@ -3308,29 +3338,60 @@ def patient_reset_password_confirm():
     return jsonify({'status': 'success', 'message': 'Patient password reset successful.'})
 
 # ===== ALERT FUNCTIONS =====
-def send_sms_alert(prediction, hr, spo2, temp):
-    """Send SMS alert for critical condition"""
+def send_sms_alert(prediction, hr, spo2, temp, recipient_phones=None, location=None):
+    """Send SMS alert for critical condition to patient SOS contacts (up to 3 numbers)"""
     if not twilio_client:
         print("⚠️ Twilio not configured. SMS not sent. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in .env")
         return False
     
-    if not TWILIO_PHONE_FROM or not PATIENT_PHONE:
-        print("⚠️ Twilio phone numbers not configured. Set TWILIO_PHONE_FROM and PATIENT_PHONE in .env")
+    if not TWILIO_PHONE_FROM:
+        print("⚠️ Twilio sender phone not configured. Set TWILIO_PHONE_FROM in .env")
         return False
     
-    try:
-        message_body = f"🚨 CRITICAL HEALTH ALERT!\nPrediction: {prediction}\nHR: {hr} bpm | SpO2: {spo2}% | Temp: {temp}°C\nImmediate medical attention required!"
-        
-        message = twilio_client.messages.create(
-            body=message_body,
-            from_=TWILIO_PHONE_FROM,
-            to=PATIENT_PHONE
-        )
-        print(f"✅ SMS sent successfully! Message SID: {message.sid}")
-        return True
-    except Exception as e:
-        print(f"❌ Error sending SMS: {str(e)}")
+    # Gather target phone numbers (up to 3 numbers)
+    phones_to_alert = []
+    if recipient_phones:
+        if isinstance(recipient_phones, list):
+            for p in recipient_phones:
+                if p and str(p).strip():
+                    phones_to_alert.append(str(p).strip())
+        elif isinstance(recipient_phones, str) and recipient_phones.strip():
+            phones_to_alert.append(recipient_phones.strip())
+    elif PATIENT_PHONE:
+        phones_to_alert.append(PATIENT_PHONE)
+
+    if not phones_to_alert:
+        print("⚠️ No valid SOS recipient phones configured.")
         return False
+
+    loc_text = ""
+    if isinstance(location, dict) and location.get('latitude') and location.get('longitude'):
+        loc_text = f"\nLive GPS Location: https://maps.google.com/?q={location['latitude']},{location['longitude']}"
+
+    message_body = (
+        f"🚨 SMART HEALTHCARE CRITICAL ALERT!\n"
+        f"Condition: {prediction}\n"
+        f"Vitals: HR {hr} bpm | SpO2 {spo2}% | Temp {temp}°C{loc_text}\n"
+        f"Immediate medical attention required!"
+    )
+
+    success_count = 0
+    for target_phone in phones_to_alert[:3]:
+        try:
+            norm_target = _normalize_phone(target_phone)
+            if not norm_target:
+                continue
+            message = twilio_client.messages.create(
+                body=message_body,
+                from_=TWILIO_PHONE_FROM,
+                to=norm_target
+            )
+            print(f"✅ SMS sent successfully to {norm_target}! SID: {message.sid}")
+            success_count += 1
+        except Exception as e:
+            print(f"❌ Error sending SMS to {target_phone}: {str(e)}")
+
+    return success_count > 0
 
 def send_email_alert(prediction, hr, spo2, temp):
     """Send email alert for critical condition"""
@@ -5412,6 +5473,23 @@ def _evaluate_and_trigger_telemetry_emergency(patient_id, record, vitals, predic
     assigned_doc = str(record.get('assignedDoctorId') or record.get('doctorId') or record.get('doctorEmail') or '').strip().lower()
     trigger_reason = f"ESP32 Telemetry Alert: {prediction.get('message') or 'Critical clinical vitals threshold breached'}"
 
+    # Extract patient SOS contacts (up to 3 contacts)
+    sos_contacts = record.get('sosContacts') or []
+    if not sos_contacts and (record.get('sosContactPhone') or record.get('sosContactName')):
+        sos_contacts = [{
+            "name": record.get('sosContactName') or "",
+            "phone": record.get('sosContactPhone') or "",
+            "relation": record.get('sosContactRelation') or "Family",
+        }]
+
+    # Filter out empty or legacy mock contacts
+    sos_contacts = [
+        c for c in sos_contacts
+        if isinstance(c, dict) and c.get('name') != 'Rahul Soni' and c.get('phone') != '+91 98765 43210' and (c.get('name') or c.get('phone'))
+    ][:3]
+
+    primary_sos = sos_contacts[0] if sos_contacts else {}
+
     alert_record = {
         "alertId": alert_id,
         "patientId": patient_id,
@@ -5419,14 +5497,15 @@ def _evaluate_and_trigger_telemetry_emergency(patient_id, record, vitals, predic
         "status": "CRITICAL",
         "triggerReason": trigger_reason,
         "vitals": {
-            "heartRate": vitals.get('heart_rate'),
+            "heartRate": vitals.get('heart_rate') or vitals.get('heartRate'),
             "spo2": vitals.get('spo2'),
             "temperature": vitals.get('temperature'),
         },
         "location": record.get('location') or {},
         "doctorId": assigned_doc or "general-triage",
         "assignedDoctorId": assigned_doc or "general-triage",
-        "sosContact": record.get('sosContact') or {},
+        "sosContacts": sos_contacts,
+        "sosContact": primary_sos,
         "isDemo": False,
         "source": "esp32-telemetry-ai",
         "createdAt": now_iso,
@@ -5440,6 +5519,18 @@ def _evaluate_and_trigger_telemetry_emergency(patient_id, record, vitals, predic
             firestore_client.collection("emergencyAlerts").document(alert_id).set(alert_record)
     except Exception as e:
         print(f"[Telemetry Alert] Database write warning: {e}")
+
+    # Dispatch automated critical SMS alerts to all configured patient SOS numbers (up to 3)
+    target_phones = [c.get('phone') for c in sos_contacts if c.get('phone')]
+    if target_phones:
+        send_sms_alert(
+            prediction=trigger_reason,
+            hr=vitals.get('heart_rate') or vitals.get('heartRate'),
+            spo2=vitals.get('spo2'),
+            temp=vitals.get('temperature'),
+            recipient_phones=target_phones,
+            location=record.get('location') or {},
+        )
 
     # Notify patient room and assigned doctor directly
     socketio.emit('emergency:new', alert_record, to=_patient_room(patient_id))
@@ -6127,7 +6218,27 @@ def emergency_trigger():
         trigger_reason = str(data.get("triggerReason") or "Critical vital thresholds breached").strip()
         vitals = data.get("vitals") or {}
         location = data.get("location") or {}
-        sos_contact = data.get("sosContact") or (patient_record.get("emergencyContact") if isinstance(patient_record, dict) else {}) or {}
+
+        # Extract patient SOS contacts (up to 3 contacts)
+        sos_contacts = data.get("sosContacts") or (patient_record.get("sosContacts") if isinstance(patient_record, dict) else []) or []
+        if not sos_contacts:
+            single_sos = data.get("sosContact") or (patient_record.get("emergencyContact") if isinstance(patient_record, dict) else {}) or {}
+            if single_sos and isinstance(single_sos, dict) and (single_sos.get("name") or single_sos.get("phone")):
+                sos_contacts = [single_sos]
+            elif isinstance(patient_record, dict) and (patient_record.get("sosContactPhone") or patient_record.get("sosContactName")):
+                sos_contacts = [{
+                    "name": patient_record.get("sosContactName") or "",
+                    "phone": patient_record.get("sosContactPhone") or "",
+                    "relation": patient_record.get("sosContactRelation") or "Family",
+                }]
+
+        # Filter out empty or legacy mock contacts
+        sos_contacts = [
+            c for c in sos_contacts
+            if isinstance(c, dict) and c.get('name') != 'Rahul Soni' and c.get('phone') != '+91 98765 43210' and (c.get('name') or c.get('phone'))
+        ][:3]
+
+        primary_sos = sos_contacts[0] if sos_contacts else {}
         is_demo = bool(data.get("isDemo", False))
 
         now_iso = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -6142,7 +6253,8 @@ def emergency_trigger():
             "location": location,
             "doctorId": doctor_id,
             "assignedDoctorId": doctor_id,
-            "sosContact": sos_contact,
+            "sosContacts": sos_contacts,
+            "sosContact": primary_sos,
             "ambulanceStatus": "NOT_REQUESTED",
             "isDemo": is_demo,
             "createdAt": now_iso,
@@ -6164,7 +6276,7 @@ def emergency_trigger():
                     "timestamp": now_iso,
                     "actor": "alert_service",
                     "action": "DOCTOR_AND_SOS_NOTIFIED",
-                    "details": f"Notified Dr. {doctor_id} & SOS Contact {sos_contact.get('phone', 'N/A')}",
+                    "details": f"Notified Dr. {doctor_id} & SOS Contact(s) ({len(sos_contacts)} recipient(s))",
                 }
             ],
         }
@@ -6183,6 +6295,18 @@ def emergency_trigger():
                 db.reference(f"patients/{patient_id}/activeEmergency").set(alert_record)
         except Exception as rtdb_err:
             print("[Emergency] RTDB write warning:", rtdb_err)
+
+        # 3. Dispatch automated critical SMS alerts to all configured patient SOS contacts (up to 3)
+        target_phones = [c.get('phone') for c in sos_contacts if c.get('phone')]
+        if target_phones and not is_demo:
+            send_sms_alert(
+                prediction=trigger_reason,
+                hr=vitals.get('heartRate') or vitals.get('heart_rate'),
+                spo2=vitals.get('spo2'),
+                temp=vitals.get('temperature'),
+                recipient_phones=target_phones,
+                location=location,
+            )
 
         # 3. Notify Doctor via Email if SMTP is configured
         if doctor_id and "@" in doctor_id and not is_demo:

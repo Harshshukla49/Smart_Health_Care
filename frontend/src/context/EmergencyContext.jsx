@@ -45,12 +45,21 @@ export function EmergencyProvider({ children, vitalsContext }) {
   const [emergencyLocationSharingEnabled, setEmergencyLocationSharingEnabled] = useState(true);
   const [thresholds, setThresholds] = useState(DEFAULT_CRITICAL_SETTINGS);
 
-  // SOS Contact
-  const [sosContact, setSosContact] = useState({
-    name: '',
-    phone: '',
-    relation: 'Brother',
-  });
+  // SOS Emergency Contacts (Max 3 contacts)
+  const [sosContacts, setSosContacts] = useState([]);
+
+  // Primary SOS contact for backward compatibility and quick dial
+  const sosContact = useMemo(() => {
+    return sosContacts[0] || { name: '', phone: '', relation: 'Family' };
+  }, [sosContacts]);
+
+  const setSosContact = useCallback((contact) => {
+    if (!contact || typeof contact !== 'object') return;
+    setSosContacts((prev) => {
+      const remaining = prev.slice(1);
+      return [contact, ...remaining].slice(0, 3);
+    });
+  }, []);
 
   // Emergency States & Modals
   const [emergencyState, setEmergencyState] = useState('NORMAL'); // 'NORMAL', 'WARNING', 'CRITICAL', 'AMBULANCE_REQUESTED', 'RESOLVED'
@@ -65,7 +74,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
 
   const autoTriggeredRef = useRef(false);
 
-  // Load Saved Settings and SOS Contact from Local Storage
+  // Load Saved Settings and SOS Contacts from Local Storage / Auth Session
   useEffect(() => {
     try {
       const session = getAuthSession();
@@ -74,22 +83,45 @@ export function EmergencyProvider({ children, vitalsContext }) {
         setThresholds({ ...DEFAULT_CRITICAL_SETTINGS, ...JSON.parse(savedSettings) });
       }
 
-      const savedSos = localStorage.getItem('patient_sos_contact');
-      if (savedSos) {
-        const parsed = JSON.parse(savedSos);
-        if (parsed?.name === 'Rahul Soni') {
-          // Clear legacy hardcoded mock contact
-          localStorage.removeItem('patient_sos_contact');
-          setSosContact({ name: '', phone: '', relation: 'Brother' });
-        } else {
-          setSosContact(parsed);
+      // Check multi-contact storage
+      const savedMultiSos = localStorage.getItem('patient_sos_contacts');
+      if (savedMultiSos) {
+        const parsed = JSON.parse(savedMultiSos);
+        if (Array.isArray(parsed)) {
+          const cleaned = parsed
+            .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && (c.name || c.phone))
+            .slice(0, 3);
+          if (cleaned.length > 0) {
+            setSosContacts(cleaned);
+          }
         }
-      } else if (session?.sosContactName || session?.sosContactPhone) {
-        setSosContact({
-          name: session.sosContactName || '',
-          phone: session.sosContactPhone || '',
-          relation: session.sosContactRelation || 'Brother',
-        });
+      } else {
+        const savedSos = localStorage.getItem('patient_sos_contact');
+        if (savedSos) {
+          const parsed = JSON.parse(savedSos);
+          if (parsed?.name === 'Rahul Soni' || parsed?.phone === '+91 98765 43210') {
+            localStorage.removeItem('patient_sos_contact');
+          } else if (parsed && (parsed.name || parsed.phone)) {
+            setSosContacts([parsed]);
+          }
+        } else if (session?.sosContacts && Array.isArray(session.sosContacts)) {
+          const cleaned = session.sosContacts
+            .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && (c.name || c.phone))
+            .slice(0, 3);
+          if (cleaned.length > 0) {
+            setSosContacts(cleaned);
+          }
+        } else if (session?.sosContactName || session?.sosContactPhone) {
+          if (session.sosContactName !== 'Rahul Soni' && session.sosContactPhone !== '+91 98765 43210') {
+            setSosContacts([
+              {
+                name: session.sosContactName || '',
+                phone: session.sosContactPhone || '',
+                relation: session.sosContactRelation || 'Family',
+              },
+            ]);
+          }
+        }
       }
 
       const savedLocShare = localStorage.getItem('location_sharing_pref');
@@ -295,6 +327,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
           risk_score: vitalPayload.risk_score || 0.92,
         },
         location: currentCoords,
+        sosContacts,
         sosContact,
         doctorId: session?.assignedDoctorId || session?.doctorId || session?.doctorEmail || '',
         isDemo,
@@ -474,6 +507,8 @@ export function EmergencyProvider({ children, vitalsContext }) {
       emergencyLocationSharingEnabled,
       setLocationSharingEnabled,
       setEmergencyLocationSharingEnabled,
+      sosContacts,
+      setSosContacts,
       sosContact,
       setSosContact,
       thresholds,
@@ -508,6 +543,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
       lastLocationTime,
       locationSharingEnabled,
       emergencyLocationSharingEnabled,
+      sosContacts,
       sosContact,
       thresholds,
       emergencyState,
@@ -549,7 +585,10 @@ export function useEmergency() {
       locationSharingEnabled: false,
       emergencyLocationSharingEnabled: false,
       thresholds: DEFAULT_CRITICAL_SETTINGS,
+      sosContacts: [],
+      setSosContacts: () => {},
       sosContact: null,
+      setSosContact: () => {},
       consentModalOpen: false,
       emergencyModalOpen: false,
       ambulanceModalOpen: false,

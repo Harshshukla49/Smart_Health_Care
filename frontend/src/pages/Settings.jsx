@@ -18,11 +18,14 @@ import {
   Phone,
   PhoneCall,
   PlayCircle,
+  Plus,
   Save,
   ShieldAlert,
   ShieldCheck,
   Sliders,
+  Trash2,
   User,
+  Users,
   Volume2,
   VolumeX,
 } from 'lucide-react';
@@ -59,18 +62,66 @@ export function Settings() {
   const [audioAlerts, setAudioAlerts] = useState(emergency.thresholds.audioAlerts !== false);
   const [autoDispatch, setAutoDispatch] = useState(emergency.thresholds.autoDispatch === true);
 
-  // SOS Emergency Contact State
-  const [sosName, setSosName] = useState(
-    emergency.sosContact?.name && emergency.sosContact.name !== 'Rahul Soni'
-      ? emergency.sosContact.name
-      : (session?.sosContactName && session.sosContactName !== 'Rahul Soni' ? session.sosContactName : '')
-  );
-  const [sosPhone, setSosPhone] = useState(
-    emergency.sosContact?.phone && emergency.sosContact.phone !== '+91 98765 43210'
-      ? emergency.sosContact.phone
-      : (session?.sosContactPhone && session.sosContactPhone !== '+91 98765 43210' ? session.sosContactPhone : '')
-  );
-  const [sosRelation, setSosRelation] = useState(emergency.sosContact?.relation || session?.sosContactRelation || 'Brother');
+  // SOS Emergency Contacts State (Up to 3 Contacts)
+  const initialSosList = useMemo(() => {
+    let list = [];
+    if (Array.isArray(emergency.sosContacts) && emergency.sosContacts.length > 0) {
+      list = emergency.sosContacts;
+    } else if (Array.isArray(session?.sosContacts) && session.sosContacts.length > 0) {
+      list = session.sosContacts;
+    } else if (emergency.sosContact?.name || emergency.sosContact?.phone) {
+      list = [emergency.sosContact];
+    } else if (session?.sosContactName || session?.sosContactPhone) {
+      list = [{
+        name: session.sosContactName || '',
+        phone: session.sosContactPhone || '',
+        relation: session.sosContactRelation || 'Family',
+      }];
+    }
+
+    const cleaned = list
+      .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && !String(c.name || '').toLowerCase().includes('rahul soni'))
+      .slice(0, 3);
+
+    return cleaned.length > 0 ? cleaned : [{ name: '', phone: '', relation: 'Family' }];
+  }, [emergency.sosContacts, emergency.sosContact, session]);
+
+  const [sosContacts, setSosContacts] = useState(initialSosList);
+
+  useEffect(() => {
+    if (initialSosList && initialSosList.length > 0) {
+      setSosContacts(initialSosList);
+    }
+  }, [initialSosList]);
+
+  // SOS Contact Handlers
+  const handleContactChange = (index, field, value) => {
+    setSosContacts((prev) => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  const handleAddContact = () => {
+    if (sosContacts.length < 3) {
+      setSosContacts((prev) => [
+        ...prev,
+        { name: '', phone: '', relation: 'Family' },
+      ]);
+    } else {
+      toast.error('Maximum 3 emergency contacts allowed.');
+    }
+  };
+
+  const handleRemoveContact = (index) => {
+    setSosContacts((prev) => {
+      if (prev.length <= 1) {
+        return [{ name: '', phone: '', relation: 'Family' }];
+      }
+      return prev.filter((_, i) => i !== index);
+    });
+  };
 
   // Location Permissions State
   const [locShare, setLocShare] = useState(emergency.locationSharingEnabled);
@@ -100,13 +151,24 @@ export function Settings() {
         setAuthSession(nextSession);
         toast.success(result?.message || 'Doctor account updated successfully.');
       } else {
+        const cleanedContacts = sosContacts
+          .map((c) => ({
+            name: (c.name || '').trim(),
+            phone: (c.phone || '').trim(),
+            relation: (c.relation || 'Family').trim(),
+          }))
+          .filter((c) => (c.name || c.phone) && !c.name.toLowerCase().includes('rahul soni'))
+          .slice(0, 3);
+        const primary = cleanedContacts[0] || { name: '', phone: '', relation: 'Family' };
+
         const result = await updatePatientProfile({
           patientId: session?.patientId,
           email,
           phone,
-          sosContactName: sosName,
-          sosContactPhone: sosPhone,
-          sosContactRelation: sosRelation,
+          sosContacts: cleanedContacts,
+          sosContactName: primary.name,
+          sosContactPhone: primary.phone,
+          sosContactRelation: primary.relation,
           locationSharingEnabled: locShare,
           emergencyLocationSharingEnabled: emergLocShare,
         });
@@ -116,6 +178,10 @@ export function Settings() {
           name: result?.patient?.name || name,
           email: result?.patient?.email || email,
           phone: result?.patient?.phone || phone,
+          sosContacts: cleanedContacts,
+          sosContactName: primary.name,
+          sosContactPhone: primary.phone,
+          sosContactRelation: primary.relation,
         };
         setAuthSession(nextSession);
         toast.success(result?.message || 'Patient account updated successfully.');
@@ -143,18 +209,65 @@ export function Settings() {
     toast.success('Clinical monitoring thresholds updated.');
   };
 
-  const handleSaveSos = (e) => {
+  const handleSaveSos = async (e) => {
     e.preventDefault();
-    const newContact = { name: sosName, phone: sosPhone, relation: sosRelation };
-    emergency.setSosContact(newContact);
+    
+    // Clean and filter valid contacts (non-empty name or phone)
+    const cleanedContacts = sosContacts
+      .map((c) => ({
+        name: (c.name || '').trim(),
+        phone: (c.phone || '').trim(),
+        relation: (c.relation || 'Family').trim(),
+      }))
+      .filter((c) => (c.name || c.phone) && !c.name.toLowerCase().includes('rahul soni') && c.phone !== '+91 98765 43210')
+      .slice(0, 3);
+
+    const primary = cleanedContacts[0] || { name: '', phone: '', relation: 'Family' };
+
+    emergency.setSosContacts(cleanedContacts);
+    emergency.setSosContact(primary);
     emergency.setLocationSharingEnabled(locShare);
     emergency.setEmergencyLocationSharingEnabled(emergLocShare);
 
-    localStorage.setItem('patient_sos_contact', JSON.stringify(newContact));
+    localStorage.setItem('patient_sos_contacts', JSON.stringify(cleanedContacts));
+    localStorage.setItem('patient_sos_contact', JSON.stringify(primary));
     localStorage.setItem('location_sharing_pref', String(locShare));
     localStorage.setItem('emergency_location_pref', String(emergLocShare));
 
-    toast.success('Emergency contact & location sharing preferences saved.');
+    // If patient session is active, sync with backend database
+    if (!isDoctor && session?.patientId) {
+      try {
+        const result = await updatePatientProfile({
+          patientId: session.patientId,
+          email,
+          phone,
+          sosContacts: cleanedContacts,
+          sosContactName: primary.name,
+          sosContactPhone: primary.phone,
+          sosContactRelation: primary.relation,
+          locationSharingEnabled: locShare,
+          emergencyLocationSharingEnabled: emergLocShare,
+        });
+
+        const nextSession = {
+          ...session,
+          name: result?.patient?.name || name,
+          email: result?.patient?.email || email,
+          phone: result?.patient?.phone || phone,
+          sosContacts: cleanedContacts,
+          sosContactName: primary.name,
+          sosContactPhone: primary.phone,
+          sosContactRelation: primary.relation,
+        };
+        setAuthSession(nextSession);
+        toast.success('Emergency SOS contacts & location preferences saved to database.');
+        return;
+      } catch (err) {
+        console.warn('Backend sync failed, saved to local cache:', err);
+      }
+    }
+
+    toast.success('Emergency contacts & location sharing preferences saved.');
   };
 
   const handleSaveSystem = (e) => {
@@ -315,69 +428,133 @@ export function Settings() {
           <div className="space-y-5">
             <Card className="p-5 sm:p-7 bg-white border border-slate-200/80 shadow-[0_4px_20px_rgba(15,23,42,0.03)]">
               <div>
-                <h2 className="font-sans text-xl font-bold text-slate-900 flex items-center gap-2">
-                  <ShieldAlert className="h-5 w-5 text-rose-600" />
-                  <span>Emergency & Designated SOS Contact</span>
-                </h2>
-                <p className="text-xs text-slate-500 mt-1">
-                  Configure trusted contacts and location sharing permissions for automatic critical alerts.
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <h2 className="font-sans text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <ShieldAlert className="h-5 w-5 text-rose-600" />
+                    <span>Emergency SOS Contacts ({sosContacts.length}/3)</span>
+                  </h2>
+                  {sosContacts.length < 3 && (
+                    <Button
+                      type="button"
+                      onClick={handleAddContact}
+                      className="bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 rounded-xl text-xs font-bold px-3 py-1.5"
+                    >
+                      <Plus className="h-3.5 w-3.5 mr-1 text-sky-600" />
+                      Add Contact ({sosContacts.length + 1}/3)
+                    </Button>
+                  )}
+                </div>
+                <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                  Configure up to 3 trusted emergency contacts (Primary, Secondary, Tertiary). During any serious condition or abnormal telemetry trigger, automated SMS alerts with live GPS location will be automatically dispatched to all configured numbers simultaneously.
                 </p>
               </div>
 
               <form onSubmit={handleSaveSos} className="mt-6 space-y-5">
-                {/* Designated SOS Contact */}
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-4">
-                  <p className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-                    Designated SOS Contact
-                  </p>
+                {/* List of SOS Contacts (Up to 3) */}
+                <div className="space-y-4">
+                  {sosContacts.map((contact, index) => {
+                    const isPrimary = index === 0;
+                    const contactBadge = isPrimary
+                      ? 'Primary Contact (1)'
+                      : index === 1
+                      ? 'Secondary Contact (2)'
+                      : 'Tertiary Contact (3)';
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold text-slate-700">SOS Contact Name</span>
-                      <div className="relative">
-                        <User className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                        <input
-                          type="text"
-                          value={sosName}
-                          onChange={(e) => setSosName(e.target.value)}
-                          placeholder="e.g. Emergency Contact Name"
-                          className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                        />
-                      </div>
-                    </label>
-
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold text-slate-700">SOS Phone Number</span>
-                      <div className="relative">
-                        <Phone className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
-                        <input
-                          type="tel"
-                          value={sosPhone}
-                          onChange={(e) => setSosPhone(e.target.value)}
-                          placeholder="e.g. +91 98765 43210"
-                          className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
-                        />
-                      </div>
-                    </label>
-
-                    <label className="space-y-1.5">
-                      <span className="text-xs font-semibold text-slate-700">Relationship</span>
-                      <select
-                        value={sosRelation}
-                        onChange={(e) => setSosRelation(e.target.value)}
-                        className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                    return (
+                      <div
+                        key={index}
+                        className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 relative"
                       >
-                        <option value="Brother">Brother</option>
-                        <option value="Sister">Sister</option>
-                        <option value="Spouse">Spouse</option>
-                        <option value="Parent">Parent</option>
-                        <option value="Child">Child</option>
-                        <option value="Guardian">Guardian</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </label>
-                  </div>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${
+                              isPrimary
+                                ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                                : 'bg-slate-200 text-slate-700'
+                            }`}>
+                              {contactBadge}
+                            </span>
+                            <span className="text-xs text-slate-500">
+                              {isPrimary ? 'Dispatched first in critical alerts' : 'Receives simultaneous SMS backup'}
+                            </span>
+                          </div>
+
+                          {(sosContacts.length > 1 || contact.name || contact.phone) && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveContact(index)}
+                              title={sosContacts.length > 1 ? 'Remove this contact' : 'Clear contact'}
+                              className="text-slate-400 hover:text-rose-600 transition p-1 rounded-lg hover:bg-rose-50"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold text-slate-700">Contact Full Name</span>
+                            <div className="relative">
+                              <User className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                              <input
+                                type="text"
+                                value={contact.name || ''}
+                                onChange={(e) => handleContactChange(index, 'name', e.target.value)}
+                                placeholder="e.g. Guardian / Family Name"
+                                className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                              />
+                            </div>
+                          </label>
+
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold text-slate-700">Mobile / WhatsApp Number</span>
+                            <div className="relative">
+                              <Phone className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-slate-400" />
+                              <input
+                                type="tel"
+                                value={contact.phone || ''}
+                                onChange={(e) => handleContactChange(index, 'phone', e.target.value)}
+                                placeholder="e.g. +91 98765 43210"
+                                className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                              />
+                            </div>
+                          </label>
+
+                          <label className="space-y-1.5">
+                            <span className="text-xs font-semibold text-slate-700">Relationship</span>
+                            <select
+                              value={contact.relation || 'Family'}
+                              onChange={(e) => handleContactChange(index, 'relation', e.target.value)}
+                              className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
+                            >
+                              <option value="Family">Family</option>
+                              <option value="Brother">Brother</option>
+                              <option value="Sister">Sister</option>
+                              <option value="Spouse">Spouse</option>
+                              <option value="Parent">Parent</option>
+                              <option value="Child">Child</option>
+                              <option value="Guardian">Guardian</option>
+                              <option value="Friend">Friend</option>
+                              <option value="Other">Other</option>
+                            </select>
+                          </label>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+
+                {/* Add Another Contact Banner if < 3 */}
+                {sosContacts.length < 3 && (
+                  <button
+                    type="button"
+                    onClick={handleAddContact}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-sky-300 bg-sky-50/50 py-3 text-xs font-bold text-sky-700 hover:bg-sky-50 transition"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>Add Another Emergency Contact ({sosContacts.length}/3 configured)</span>
+                  </button>
+                )}
 
                 {/* Location Sharing Toggles */}
                 <div className="space-y-3 pt-2">
@@ -404,7 +581,7 @@ export function Settings() {
                     <div className="pr-4">
                       <p className="text-xs font-bold text-slate-900">Emergency Location Sharing</p>
                       <p className="text-[11px] text-slate-500 mt-0.5 leading-relaxed">
-                        Allows your current GPS location coordinates and safe map link to be dispatched to your authorized emergency contact during confirmed emergencies.
+                        Allows your current GPS location coordinates and safe map link to be dispatched to your authorized emergency contacts during confirmed emergencies.
                       </p>
                     </div>
                     <input
@@ -417,7 +594,7 @@ export function Settings() {
                 </div>
 
                 <div className="pt-4 flex items-center justify-between border-t border-slate-100">
-                  <span className="text-xs text-slate-500">Only configured contacts receive location links</span>
+                  <span className="text-xs text-slate-500">Only configured contacts receive location alerts</span>
                   <Button
                     type="submit"
                     className="bg-sky-600 hover:bg-sky-700 text-white rounded-xl text-xs font-bold"

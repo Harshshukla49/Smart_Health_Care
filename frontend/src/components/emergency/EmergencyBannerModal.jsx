@@ -35,6 +35,7 @@ export function EmergencyBannerModal() {
     emergencyModalOpen,
     setEmergencyModalOpen,
     sosContact,
+    sosContacts,
     ambulanceModalOpen,
     setAmbulanceModalOpen,
     ambulanceRequested,
@@ -66,14 +67,18 @@ export function EmergencyBannerModal() {
   const session = getAuthSession();
   const rawDocName = activeEmergency?.doctorName || activeEmergency?.assignedDoctorName || session?.doctorName || 'Assigned Physician';
   const doctorName = rawDocName.toLowerCase().startsWith('dr.') ? rawDocName : `Dr. ${rawDocName}`;
-  const doctorPhone = activeEmergency?.doctorPhone || session?.doctorPhone || '+919876543210';
+  const doctorPhone = activeEmergency?.doctorPhone || session?.doctorPhone || '';
 
   const handleCallDoctor = () => {
-    window.open(`tel:${String(doctorPhone).replace(/[^0-9+]/g, '')}`);
+    if (doctorPhone) {
+      window.open(`tel:${String(doctorPhone).replace(/[^0-9+]/g, '')}`);
+    } else {
+      toast.error('No doctor phone number registered.');
+    }
   };
 
   const handleCallSos = () => {
-    const phone = sosContact?.phone || session?.sosContactPhone;
+    const phone = sosContact?.phone || (Array.isArray(sosContacts) && sosContacts[0]?.phone) || session?.sosContactPhone;
     if (phone) {
       window.open(`tel:${String(phone).replace(/[^0-9+]/g, '')}`);
     } else {
@@ -180,10 +185,17 @@ export function EmergencyBannerModal() {
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                   Attending physician notified ({doctorName})
                 </p>
-                {sosContact?.name ? (
+                {Array.isArray(sosContacts) && sosContacts.length > 0 && sosContacts[0]?.name ? (
                   <p className="flex items-center gap-2 text-emerald-700 font-bold">
-                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                    SOS Contact notified ({sosContact.name} · {sosContact.phone || 'Configured'})
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>
+                      SOS Contacts notified ({sosContacts.map((c) => `${c.name} [${c.phone || c.relation || 'Contact'}]`).join(', ')})
+                    </span>
+                  </p>
+                ) : sosContact?.name ? (
+                  <p className="flex items-center gap-2 text-emerald-700 font-bold">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+                    <span>SOS Contact notified ({sosContact.name} · {sosContact.phone || 'Configured'})</span>
                   </p>
                 ) : (
                   <p className="flex items-center gap-2 text-slate-400">
@@ -244,7 +256,11 @@ export function EmergencyBannerModal() {
                     Call SOS Contact
                   </span>
                   <span className="block text-[11px] font-normal opacity-90 truncate">
-                    {sosContact?.name ? `${sosContact.name} (${sosContact.relation || 'Contact'})` : 'No SOS contact set'}
+                    {sosContact?.name
+                      ? `${sosContact.name} (${sosContact.relation || 'Primary'})`
+                      : (Array.isArray(sosContacts) && sosContacts[0]?.name)
+                      ? `${sosContacts[0].name} (${sosContacts[0].relation || 'Primary'})`
+                      : 'No SOS contact set'}
                   </span>
                 </div>
               </button>

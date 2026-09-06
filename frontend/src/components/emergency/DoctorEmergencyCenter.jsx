@@ -156,7 +156,25 @@ export function DoctorEmergencyCenter() {
 
                       {/* Call Patient Button (neutral white/gray) */}
                       <a
-                        href={alert.sosContact?.phone ? `tel:${alert.sosContact.phone}` : 'tel:+918601845515'}
+                        href={
+                          alert.patientPhone
+                            ? `tel:${alert.patientPhone}`
+                            : alert.sosContact?.phone
+                            ? `tel:${alert.sosContact.phone}`
+                            : Array.isArray(alert.sosContacts) && alert.sosContacts[0]?.phone
+                            ? `tel:${alert.sosContacts[0].phone}`
+                            : '#'
+                        }
+                        onClick={(e) => {
+                          const phone =
+                            alert.patientPhone ||
+                            alert.sosContact?.phone ||
+                            (Array.isArray(alert.sosContacts) && alert.sosContacts[0]?.phone);
+                          if (!phone) {
+                            e.preventDefault();
+                            toast.error('No contact phone available for this patient.');
+                          }
+                        }}
                         className="inline-flex items-center gap-1.5 rounded-[10px] border border-[#E2E8F0] bg-white px-3.5 py-2 text-xs font-semibold text-[#0F172A] shadow-2xs hover:bg-slate-50 transition"
                       >
                         <Phone className="h-4 w-4 text-[#64748B]" />

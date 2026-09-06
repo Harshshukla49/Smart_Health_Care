@@ -475,11 +475,27 @@ export const updateDoctorProfile = async ({ name, email, phone }) => {
   };
 };
 
-export const updatePatientProfile = async ({ patientId, email, phone }) => {
+export const updatePatientProfile = async ({
+  patientId,
+  email,
+  phone,
+  sosContacts,
+  sosContactName,
+  sosContactPhone,
+  sosContactRelation,
+  locationSharingEnabled,
+  emergencyLocationSharingEnabled,
+}) => {
   const response = await api.post('/patient/profile/update', {
     patientId: toText(patientId),
     email: toText(email).toLowerCase(),
     phone: toText(phone),
+    sosContacts: Array.isArray(sosContacts) ? sosContacts : undefined,
+    sosContactName: toText(sosContactName),
+    sosContactPhone: toText(sosContactPhone),
+    sosContactRelation: toText(sosContactRelation),
+    locationSharingEnabled,
+    emergencyLocationSharingEnabled,
   });
 
   return {
