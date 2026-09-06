@@ -73,8 +73,12 @@ export function EmergencyBannerModal() {
   };
 
   const handleCallSos = () => {
-    const phone = sosContact?.phone || '+919876543210';
-    window.open(`tel:${phone.replace(/[^0-9+]/g, '')}`);
+    const phone = sosContact?.phone || session?.sosContactPhone;
+    if (phone) {
+      window.open(`tel:${String(phone).replace(/[^0-9+]/g, '')}`);
+    } else {
+      toast.error('No designated SOS phone number configured in Settings.');
+    }
   };
 
   const handleShareLocation = async () => {
@@ -176,10 +180,17 @@ export function EmergencyBannerModal() {
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                   Attending physician notified ({doctorName})
                 </p>
-                <p className="flex items-center gap-2 text-emerald-700 font-bold">
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  SOS Contact notified ({sosContact?.name || 'Rahul Soni'} · {sosContact?.phone})
-                </p>
+                {sosContact?.name ? (
+                  <p className="flex items-center gap-2 text-emerald-700 font-bold">
+                    <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+                    SOS Contact notified ({sosContact.name} · {sosContact.phone || 'Configured'})
+                  </p>
+                ) : (
+                  <p className="flex items-center gap-2 text-slate-400">
+                    <span className="h-3 w-3 rounded-full border border-slate-300 ml-0.5 mr-0.5" />
+                    No designated SOS contact configured
+                  </p>
+                )}
                 <p className="flex items-center gap-2 text-emerald-700 font-bold">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
                   Location sharing active (±{coords.accuracy}m accuracy)
@@ -233,7 +244,7 @@ export function EmergencyBannerModal() {
                     Call SOS Contact
                   </span>
                   <span className="block text-[11px] font-normal opacity-90 truncate">
-                    {sosContact?.name || 'Rahul Soni'} ({sosContact?.relation || 'Brother'})
+                    {sosContact?.name ? `${sosContact.name} (${sosContact.relation || 'Contact'})` : 'No SOS contact set'}
                   </span>
                 </div>
               </button>

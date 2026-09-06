@@ -47,8 +47,8 @@ export function EmergencyProvider({ children, vitalsContext }) {
 
   // SOS Contact
   const [sosContact, setSosContact] = useState({
-    name: 'Rahul Soni',
-    phone: '+91 98765 43210',
+    name: '',
+    phone: '',
     relation: 'Brother',
   });
 
@@ -68,6 +68,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
   // Load Saved Settings and SOS Contact from Local Storage
   useEffect(() => {
     try {
+      const session = getAuthSession();
       const savedSettings = localStorage.getItem('clinical_settings');
       if (savedSettings) {
         setThresholds({ ...DEFAULT_CRITICAL_SETTINGS, ...JSON.parse(savedSettings) });
@@ -75,7 +76,20 @@ export function EmergencyProvider({ children, vitalsContext }) {
 
       const savedSos = localStorage.getItem('patient_sos_contact');
       if (savedSos) {
-        setSosContact(JSON.parse(savedSos));
+        const parsed = JSON.parse(savedSos);
+        if (parsed?.name === 'Rahul Soni') {
+          // Clear legacy hardcoded mock contact
+          localStorage.removeItem('patient_sos_contact');
+          setSosContact({ name: '', phone: '', relation: 'Brother' });
+        } else {
+          setSosContact(parsed);
+        }
+      } else if (session?.sosContactName || session?.sosContactPhone) {
+        setSosContact({
+          name: session.sosContactName || '',
+          phone: session.sosContactPhone || '',
+          relation: session.sosContactRelation || 'Brother',
+        });
       }
 
       const savedLocShare = localStorage.getItem('location_sharing_pref');

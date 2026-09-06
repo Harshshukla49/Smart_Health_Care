@@ -162,7 +162,7 @@ export function AddPatient() {
                   name="sosContactName"
                   value={formData.sosContactName}
                   onChange={handleChange}
-                  placeholder="e.g. Rahul Soni"
+                  placeholder="e.g. Emergency Contact Name"
                   required={false}
                 />
                 <Field

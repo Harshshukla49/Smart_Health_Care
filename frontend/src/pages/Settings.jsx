@@ -47,7 +47,7 @@ export function Settings() {
   // Account State
   const [name, setName] = useState(session?.name || (isDoctor ? 'Doctor' : 'Patient'));
   const [email, setEmail] = useState(session?.email || (isDoctor ? 'doctor@hospital.org' : 'patient@hospital.org'));
-  const [phone, setPhone] = useState(session?.phone || '+91 98765 43210');
+  const [phone, setPhone] = useState(session?.phone || '');
   const [savingAccount, setSavingAccount] = useState(false);
 
   // Clinical Thresholds State
@@ -60,9 +60,17 @@ export function Settings() {
   const [autoDispatch, setAutoDispatch] = useState(emergency.thresholds.autoDispatch === true);
 
   // SOS Emergency Contact State
-  const [sosName, setSosName] = useState(emergency.sosContact?.name || 'Rahul Soni');
-  const [sosPhone, setSosPhone] = useState(emergency.sosContact?.phone || '+91 98765 43210');
-  const [sosRelation, setSosRelation] = useState(emergency.sosContact?.relation || 'Brother');
+  const [sosName, setSosName] = useState(
+    emergency.sosContact?.name && emergency.sosContact.name !== 'Rahul Soni'
+      ? emergency.sosContact.name
+      : (session?.sosContactName && session.sosContactName !== 'Rahul Soni' ? session.sosContactName : '')
+  );
+  const [sosPhone, setSosPhone] = useState(
+    emergency.sosContact?.phone && emergency.sosContact.phone !== '+91 98765 43210'
+      ? emergency.sosContact.phone
+      : (session?.sosContactPhone && session.sosContactPhone !== '+91 98765 43210' ? session.sosContactPhone : '')
+  );
+  const [sosRelation, setSosRelation] = useState(emergency.sosContact?.relation || session?.sosContactRelation || 'Brother');
 
   // Location Permissions State
   const [locShare, setLocShare] = useState(emergency.locationSharingEnabled);
@@ -332,8 +340,7 @@ export function Settings() {
                           type="text"
                           value={sosName}
                           onChange={(e) => setSosName(e.target.value)}
-                          required
-                          placeholder="e.g. Rahul Soni"
+                          placeholder="e.g. Emergency Contact Name"
                           className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                         />
                       </div>
@@ -347,7 +354,6 @@ export function Settings() {
                           type="tel"
                           value={sosPhone}
                           onChange={(e) => setSosPhone(e.target.value)}
-                          required
                           placeholder="e.g. +91 98765 43210"
                           className="w-full rounded-xl border border-slate-200 bg-white pl-9 pr-3 py-2.5 text-sm text-slate-900 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-100"
                         />
