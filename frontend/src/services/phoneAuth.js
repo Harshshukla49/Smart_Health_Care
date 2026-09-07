@@ -50,6 +50,10 @@ const mapFirebasePhoneError = (error, phase = 'send') => {
   const code = String(error?.code || '').toLowerCase();
   const message = String(error?.message || '').toLowerCase();
 
+  if (code.includes('billing-not-enabled') || message.includes('billing-not-enabled')) {
+    return 'Firebase Phone Auth requires Blaze Plan or registering this number under "Phone numbers for testing" in Firebase Console.';
+  }
+
   if (code.includes('invalid-phone-number')) {
     return 'Invalid phone number. Use format +919876543210.';
   }
