@@ -15,6 +15,8 @@ const RTC_CONFIG = {
     { urls: 'stun:stun2.l.google.com:19302' },
     { urls: 'stun:stun3.l.google.com:19302' },
     { urls: 'stun:stun4.l.google.com:19302' },
+    { urls: 'stun:stun.services.mozilla.com' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
     ...(import.meta.env.VITE_TURN_SERVER
       ? [
           {
@@ -25,6 +27,7 @@ const RTC_CONFIG = {
         ]
       : []),
   ],
+  iceCandidatePoolSize: 10,
 };
 
 // Standard Available Hospital Specialist Department extensions (Available for direct dial)
@@ -358,17 +361,41 @@ export function VideoCallProvider({ children }) {
     }
   }, [stopAllCallSounds]);
 
-  // Real Camera & Mic Stream acquisition
+  // Real Camera & Mic Stream acquisition with fallback
   const acquireMediaStream = useCallback(async () => {
+    if (localStreamRef.current) {
+      return localStreamRef.current;
+    }
+
     try {
       if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
-        localStreamRef.current = stream;
-        setLocalStream(stream);
-        return stream;
+        // First try standard high quality video + audio
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+              width: { ideal: 1280, max: 1920 },
+              height: { ideal: 720, max: 1080 },
+              facingMode: 'user',
+            },
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+          localStreamRef.current = stream;
+          setLocalStream(stream);
+          return stream;
+        } catch (initialErr) {
+          console.warn('High-spec camera init failed, falling back to basic video/audio:', initialErr);
+          const basicStream = await navigator.mediaDevices.getUserMedia({
+            video: true,
+            audio: true,
+          });
+          localStreamRef.current = basicStream;
+          setLocalStream(basicStream);
+          return basicStream;
+        }
       }
     } catch (err) {
       console.warn('Camera/Mic permission denied or not available:', err);
@@ -379,12 +406,20 @@ export function VideoCallProvider({ children }) {
 
   const stopMediaStream = useCallback(() => {
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
       localStreamRef.current = null;
       setLocalStream(null);
     }
     if (remoteStreamRef.current) {
-      remoteStreamRef.current.getTracks().forEach((track) => track.stop());
+      remoteStreamRef.current.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {}
+      });
       remoteStreamRef.current = null;
       setRemoteStream(null);
     }
@@ -410,37 +445,68 @@ export function VideoCallProvider({ children }) {
           callId,
           targetRole,
           targetId,
-          candidate: event.candidate.toJSON(),
+          fromRole: userRole,
+          fromId: currentUserId,
+          candidate: event.candidate.toJSON ? event.candidate.toJSON() : event.candidate,
         });
       }
     };
 
-    // Receive incoming remote tracks
+    // Receive incoming remote tracks and ensure video/audio streams update reliably
     pc.ontrack = (event) => {
-      if (event.streams && event.streams[0]) {
-        remoteStreamRef.current = event.streams[0];
-        setRemoteStream(event.streams[0]);
+      console.log('[WEBRTC] ontrack event received:', event.track?.kind, event.streams);
+      let incomingStream = event.streams && event.streams[0] ? event.streams[0] : null;
+
+      if (!incomingStream) {
+        if (!remoteStreamRef.current) {
+          remoteStreamRef.current = new MediaStream();
+        }
+        if (event.track && !remoteStreamRef.current.getTracks().some((t) => t.id === event.track.id)) {
+          remoteStreamRef.current.addTrack(event.track);
+        }
+        incomingStream = remoteStreamRef.current;
+      } else {
+        remoteStreamRef.current = incomingStream;
       }
+
+      if (event.track) {
+        event.track.onunmute = () => {
+          console.log('[WEBRTC] Remote track unmuted:', event.track.kind);
+          if (remoteStreamRef.current) {
+            setRemoteStream(new MediaStream(remoteStreamRef.current.getTracks()));
+          }
+        };
+      }
+
+      setRemoteStream(new MediaStream(incomingStream.getTracks()));
     };
 
     const updateConnectedStatus = () => {
       const connState = pc.connectionState;
       const iceState = pc.iceConnectionState;
+      console.log('[WEBRTC] Peer connection state:', { connState, iceState });
       if (connState === 'connected' || iceState === 'connected' || iceState === 'completed') {
         setCallState('connected');
       } else if (connState === 'failed' || iceState === 'failed') {
         console.warn('[WEBRTC] Connection failed:', { connState, iceState });
-        toast.error('Video link connection unstable or failed. Retrying...');
+        try {
+          pc.restartIce();
+        } catch {}
       }
     };
 
     pc.onconnectionstatechange = updateConnectedStatus;
     pc.oniceconnectionstatechange = updateConnectedStatus;
 
-    // Add local tracks to peer connection
+    // Attach all local tracks to peer connection
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => {
-        pc.addTrack(track, localStreamRef.current);
+        try {
+          pc.addTrack(track, localStreamRef.current);
+          console.log('[WEBRTC] Attached local track to PC:', track.kind, track.label);
+        } catch (e) {
+          console.warn('[WEBRTC] Error attaching track:', e);
+        }
       });
     }
 
@@ -473,6 +539,8 @@ export function VideoCallProvider({ children }) {
   stopMediaStreamRef.current = stopMediaStream;
   const closePeerConnectionRef = useRef(closePeerConnection);
   closePeerConnectionRef.current = closePeerConnection;
+  const acquireMediaStreamRef = useRef(acquireMediaStream);
+  acquireMediaStreamRef.current = acquireMediaStream;
 
   // Persistent Authenticated Socket Connection
   useEffect(() => {
@@ -542,6 +610,12 @@ export function VideoCallProvider({ children }) {
       playConnectChimeRef.current();
       setCallState('connecting');
 
+      // Ensure local media is acquired
+      let localMedia = localStreamRef.current;
+      if (!localMedia) {
+        localMedia = await acquireMediaStreamRef.current();
+      }
+
       // The caller initiates the WebRTC offer towards the counterparty
       const isDoctorCaller = userRole === 'doctor';
       const targetRole = isDoctorCaller ? 'patient' : 'doctor';
@@ -573,12 +647,26 @@ export function VideoCallProvider({ children }) {
     // 3. WebRTC Offer (Received by the party that accepted the call)
     socket.on('webrtc:offer', async (payload) => {
       console.log('[WEBRTC-CALL] WebRTC offer received:', payload);
+      // Guard: Ignore if offer originated from self
+      if (payload.fromId && String(payload.fromId).toLowerCase() === String(currentUserId).toLowerCase()) {
+        return;
+      }
+      if (payload.fromRole && payload.fromRole === userRole) {
+        return;
+      }
+
       const isDoctorReceiver = userRole === 'doctor';
       const targetRole = isDoctorReceiver ? 'patient' : 'doctor';
       const currentCall = activeCallRef.current;
       const targetId = isDoctorReceiver
         ? (payload.fromId || currentCall?.patientId)
         : (payload.fromId || currentCall?.doctorId);
+
+      // Ensure local media is ready on the receiver side before creating PC
+      let localMedia = localStreamRef.current;
+      if (!localMedia) {
+        localMedia = await acquireMediaStreamRef.current();
+      }
 
       const pc = createPeerConnectionRef.current(payload.callId, targetRole, targetId);
 
@@ -588,10 +676,15 @@ export function VideoCallProvider({ children }) {
         // Flush any queued ICE candidates
         while (iceCandidateQueueRef.current.length > 0) {
           const cand = iceCandidateQueueRef.current.shift();
-          await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          if (cand) {
+            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+          }
         }
 
-        const answer = await pc.createAnswer();
+        const answer = await pc.createAnswer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+        });
         await pc.setLocalDescription(answer);
 
         socket.emit('webrtc:answer', {
@@ -604,7 +697,7 @@ export function VideoCallProvider({ children }) {
         });
 
         playConnectChimeRef.current();
-        setCallState('connecting');
+        setCallState('connected');
       } catch (err) {
         console.error('[WEBRTC] Failed to process offer:', err);
       }
@@ -613,6 +706,14 @@ export function VideoCallProvider({ children }) {
     // 4. WebRTC Answer (Received by the offerer)
     socket.on('webrtc:answer', async (payload) => {
       console.log('[WEBRTC-CALL] WebRTC answer received:', payload);
+      // Guard: Ignore if answer originated from self
+      if (payload.fromId && String(payload.fromId).toLowerCase() === String(currentUserId).toLowerCase()) {
+        return;
+      }
+      if (payload.fromRole && payload.fromRole === userRole) {
+        return;
+      }
+
       const pc = peerConnectionRef.current;
       if (pc) {
         try {
@@ -621,7 +722,9 @@ export function VideoCallProvider({ children }) {
           // Flush any queued ICE candidates
           while (iceCandidateQueueRef.current.length > 0) {
             const cand = iceCandidateQueueRef.current.shift();
-            await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+            if (cand) {
+              await pc.addIceCandidate(new RTCIceCandidate(cand)).catch(() => {});
+            }
           }
           const connState = pc.connectionState;
           if (connState === 'connected') {
@@ -635,14 +738,24 @@ export function VideoCallProvider({ children }) {
 
     // 5. WebRTC ICE Candidate (Received by both)
     socket.on('webrtc:ice_candidate', async (payload) => {
+      // Guard: Ignore if candidate originated from self
+      if (payload.fromId && String(payload.fromId).toLowerCase() === String(currentUserId).toLowerCase()) {
+        return;
+      }
+      if (payload.fromRole && payload.fromRole === userRole) {
+        return;
+      }
+
       const pc = peerConnectionRef.current;
-      if (pc && pc.remoteDescription) {
+      if (pc && pc.remoteDescription && pc.remoteDescription.type) {
         try {
-          await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          if (payload.candidate) {
+            await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+          }
         } catch (err) {
           console.warn('[WEBRTC] Error adding candidate:', err);
         }
-      } else {
+      } else if (payload.candidate) {
         iceCandidateQueueRef.current.push(payload.candidate);
       }
     });

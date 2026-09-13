@@ -39,17 +39,40 @@ export function ActiveVideoCallModal() {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
 
+  const attachStreamToVideo = useCallback((el, stream, muted = false) => {
+    if (!el) return;
+    if (stream) {
+      if (el.srcObject !== stream) {
+        el.srcObject = stream;
+      }
+      el.muted = muted;
+      el.play?.().catch((err) => {
+        console.log('[VIDEO] Autoplay suppressed:', err);
+      });
+    }
+  }, []);
+
+  const setRemoteVideoEl = useCallback((el) => {
+    remoteVideoRef.current = el;
+    attachStreamToVideo(el, remoteStream, false);
+  }, [remoteStream, attachStreamToVideo]);
+
+  const setLocalVideoEl = useCallback((el) => {
+    localVideoRef.current = el;
+    attachStreamToVideo(el, localStream, true);
+  }, [localStream, attachStreamToVideo]);
+
   useEffect(() => {
     if (localVideoRef.current && localStream) {
-      localVideoRef.current.srcObject = localStream;
+      attachStreamToVideo(localVideoRef.current, localStream, true);
     }
-  }, [localStream, callState]);
+  }, [localStream, isCameraOff, attachStreamToVideo]);
 
   useEffect(() => {
     if (remoteVideoRef.current && remoteStream) {
-      remoteVideoRef.current.srcObject = remoteStream;
+      attachStreamToVideo(remoteVideoRef.current, remoteStream, false);
     }
-  }, [remoteStream, callState]);
+  }, [remoteStream, attachStreamToVideo]);
 
   if (callState !== 'calling' && callState !== 'connecting' && callState !== 'connected' && callState !== 'ended') {
     return null;
@@ -192,15 +215,19 @@ export function ActiveVideoCallModal() {
         <div className="relative flex-1 bg-slate-950 flex items-center justify-center overflow-hidden">
           {/* Main Remote Video feed */}
           <div className="relative w-full h-full flex items-center justify-center overflow-hidden bg-slate-950">
-            {remoteStream ? (
-              <video
-                ref={remoteVideoRef}
-                autoPlay
-                playsInline
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <div className="flex flex-col items-center justify-center text-center p-6 text-slate-300">
+            {/* Remote Video is permanently mounted so tracks & audio playback attach without unmount delay */}
+            <video
+              ref={setRemoteVideoEl}
+              autoPlay
+              playsInline
+              className={`w-full h-full object-cover transition-opacity duration-300 ${remoteStream ? 'opacity-100' : 'opacity-0'}`}
+              onLoadedMetadata={(e) => {
+                e.target.play().catch(() => {});
+              }}
+            />
+
+            {!remoteStream && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 text-slate-300 z-10 bg-slate-950/90">
                 <div className="relative mb-4">
                   <div className="w-24 h-24 rounded-full border-4 border-sky-400/50 bg-slate-800 flex items-center justify-center shadow-xl">
                     <User className="h-12 w-12 text-sky-300" />
@@ -223,7 +250,7 @@ export function ActiveVideoCallModal() {
             )}
 
             {/* Ambient Remote Participant Tag (Top Left) */}
-            <div className="absolute top-4 left-4 rounded-xl bg-slate-900/75 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 text-xs text-white flex items-center gap-2 shadow-lg">
+            <div className="absolute top-4 left-4 rounded-xl bg-slate-900/75 border border-slate-700/80 backdrop-blur-md px-3.5 py-2 text-xs text-white flex items-center gap-2 shadow-lg z-20">
               <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
               <div>
                 <p className="font-bold leading-none">{remoteDisplayName}</p>
@@ -233,7 +260,7 @@ export function ActiveVideoCallModal() {
 
             {/* Floating Patient Telemetry HUD Overlay (Top Right - Doctor View) */}
             {isDoctor && (
-              <div className="absolute top-4 right-4 rounded-2xl bg-slate-900/85 border border-slate-700/80 backdrop-blur-md p-3 text-white max-w-xs shadow-xl hidden sm:block">
+              <div className="absolute top-4 right-4 rounded-2xl bg-slate-900/85 border border-slate-700/80 backdrop-blur-md p-3 text-white max-w-xs shadow-xl hidden sm:block z-20">
                 <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1">
                   <Activity className="h-3 w-3 text-sky-400" />
                   <span>Patient Telemetry Stream</span>
@@ -259,16 +286,18 @@ export function ActiveVideoCallModal() {
             )}
 
             {/* Local Camera Picture-in-Picture (Bottom Right) */}
-            <div className="absolute bottom-4 right-4 w-32 h-24 sm:w-44 sm:h-32 rounded-2xl border-2 border-slate-600 bg-slate-800 overflow-hidden shadow-2xl z-10">
-              {localStream && !isCameraOff ? (
-                <video
-                  ref={localVideoRef}
-                  autoPlay
-                  playsInline
-                  muted
-                  className="w-full h-full object-cover -scale-x-100"
-                />
-              ) : (
+            <div className="absolute bottom-4 right-4 w-32 h-24 sm:w-44 sm:h-32 rounded-2xl border-2 border-slate-600 bg-slate-800 overflow-hidden shadow-2xl z-20">
+              <video
+                ref={setLocalVideoEl}
+                autoPlay
+                playsInline
+                muted
+                className={`w-full h-full object-cover -scale-x-100 ${localStream && !isCameraOff ? 'block' : 'hidden'}`}
+                onLoadedMetadata={(e) => {
+                  e.target.play().catch(() => {});
+                }}
+              />
+              {(!localStream || isCameraOff) && (
                 <div className="w-full h-full flex flex-col items-center justify-center bg-slate-800 text-slate-400 p-2 text-center">
                   <User className="h-6 w-6 text-slate-500" />
                   <span className="text-[10px] mt-1 text-slate-400">
@@ -276,8 +305,8 @@ export function ActiveVideoCallModal() {
                   </span>
                 </div>
               )}
-              <span className="absolute bottom-1 left-2 text-[9px] font-bold text-white bg-black/60 px-1.5 rounded">
-                You ({isDoctor ? 'Dr. ' + session?.name : 'Patient'})
+              <span className="absolute bottom-1 left-2 text-[9px] font-bold text-white bg-black/60 px-1.5 rounded pointer-events-none">
+                You ({isDoctor ? 'Dr. ' + (session?.name || 'Physician') : 'Patient'})
               </span>
             </div>
           </div>
