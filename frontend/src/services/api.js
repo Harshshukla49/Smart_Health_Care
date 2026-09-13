@@ -13,8 +13,8 @@ export const resolveApiBaseUrl = () => {
     if (hostname === 'localhost' || hostname === '127.0.0.1') {
       return 'http://localhost:5000';
     }
-    // If running on a Render service where Flask also hosts the UI
-    if (hostname.includes('backend') || hostname.includes('onrender.com')) {
+    // Only use origin if running on a monolithic Render service where Flask hosts both API and UI
+    if (hostname.includes('backend') && hostname.includes('onrender.com')) {
       return origin;
     }
   }
@@ -24,12 +24,12 @@ export const resolveApiBaseUrl = () => {
 
 const api = axios.create({
   baseURL: resolveApiBaseUrl(),
-  timeout: 15000,
+  timeout: 60000,
 });
 
 const sosApi = axios.create({
-  baseURL: import.meta.env.VITE_SOS_API_BASE_URL || 'http://localhost:5001',
-  timeout: 15000,
+  baseURL: import.meta.env.VITE_SOS_API_BASE_URL || resolveApiBaseUrl(),
+  timeout: 60000,
 });
 
 const PATIENT_STORAGE_KEY = 'smart-health-patients';
@@ -64,8 +64,20 @@ const attachSessionHeaders = (config) => {
   return config;
 };
 
+const handleApiError = (error) => {
+  if (error?.code === 'ECONNABORTED' || (error?.message && error.message.toLowerCase().includes('timeout'))) {
+    error.message = 'The cloud healthcare server is waking up from standby (Render cold start). Please wait a few seconds and try again.';
+  } else if (error?.message === 'Network Error' || error?.code === 'ERR_NETWORK') {
+    error.message = 'Unable to reach the healthcare cloud server. Please check your network connection.';
+  }
+  return Promise.reject(error);
+};
+
 api.interceptors.request.use(attachSessionHeaders);
 sosApi.interceptors.request.use(attachSessionHeaders);
+
+api.interceptors.response.use((response) => response, handleApiError);
+sosApi.interceptors.response.use((response) => response, handleApiError);
 
 const unwrapEnvelope = (responseOrPayload) => {
   const payload = responseOrPayload?.data !== undefined ? responseOrPayload.data : (responseOrPayload || {});
