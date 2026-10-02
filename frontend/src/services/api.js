@@ -741,6 +741,39 @@ export const getEmergencyAuditLogApi = async (alertId) => {
   }
 };
 
+export const getNearbyFacilitiesApi = async ({ lat, lng, radius = 10, type = 'all', limit = 30 } = {}) => {
+  try {
+    const params = new URLSearchParams();
+    if (lat !== undefined && lat !== null) params.set('lat', String(lat));
+    if (lng !== undefined && lng !== null) params.set('lng', String(lng));
+    if (radius) params.set('radius', String(radius));
+    if (type) params.set('type', String(type));
+    if (limit) params.set('limit', String(limit));
+
+    const response = await api.get(`/api/emergency/nearby-facilities?${params.toString()}`);
+    const data = response?.data || {};
+    return {
+      status: data.status || 'success',
+      count: data.count || (data.facilities ? data.facilities.length : 0),
+      facilities: Array.isArray(data.facilities) ? data.facilities : [],
+      provider: data.provider || 'OpenStreetMap Healthcare POI Database',
+      lastUpdated: data.lastUpdated || new Date().toISOString(),
+      center: data.center || { latitude: lat, longitude: lng },
+      radiusKm: data.radiusKm || radius,
+    };
+  } catch (err) {
+    console.warn('[Places API] Failed to retrieve real nearby facilities:', err);
+    return {
+      status: 'error',
+      count: 0,
+      facilities: [],
+      provider: 'OpenStreetMap Healthcare POI Database',
+      lastUpdated: new Date().toISOString(),
+      message: err?.message || 'Unable to retrieve nearby facilities.',
+    };
+  }
+};
+
 export const getChatThreadContext = async ({ patientId } = {}) => {
   const query = patientId ? `?patientId=${encodeURIComponent(toText(patientId))}` : '';
   const response = await api.get(`/chat/thread-context${query}`);

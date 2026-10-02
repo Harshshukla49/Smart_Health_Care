@@ -1762,12 +1762,12 @@ function DashboardBody({ liveVitals }) {
 
       {/* Dedicated Standalone Map Modal */}
       {showLocationMapModal && (
-        <div className="fixed inset-0 z-[9995] grid place-items-center bg-slate-900/60 p-4 backdrop-blur-xs">
-          <div className="relative w-full max-w-2xl rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl">
+        <div className="fixed inset-0 z-[9995] grid place-items-center bg-slate-900/60 p-4 backdrop-blur-xs overflow-y-auto">
+          <div className="relative w-full max-w-4xl rounded-3xl border border-slate-200 bg-white p-5 sm:p-6 shadow-2xl my-8">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
               <h3 className="font-sans text-lg font-bold text-slate-900 flex items-center gap-2">
                 <MapPin className="h-5 w-5 text-sky-600" />
-                <span>Patient Telemetry Location Map</span>
+                <span>Live Hospital Discovery & Patient Location Map</span>
               </h3>
               <button
                 type="button"

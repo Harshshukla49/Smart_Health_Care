@@ -6651,41 +6651,27 @@ def emergency_get_audit(alert_id):
 
 
 @app.route("/api/emergency/nearby-facilities", methods=["GET"])
+@app.route("/api/places/nearby-hospitals", methods=["GET"])
 def emergency_nearby_facilities():
     try:
         lat = float(request.args.get("lat", 28.6139))
         lng = float(request.args.get("lng", 77.2090))
+        radius = float(request.args.get("radius", 10.0))
+        facility_type = str(request.args.get("type", "all")).strip().lower()
+        limit = int(request.args.get("limit", 30))
 
-        facilities = [
-            {
-                "name": "AIIMS Emergency & Trauma Center",
-                "specialty": "Level 1 Trauma & 24/7 Cardiology",
-                "distanceKm": 2.4,
-                "phone": "+91 11 2658 8500",
-                "openNow": True,
-            },
-            {
-                "name": "Apollo Hospitals Emergency Bay",
-                "specialty": "Critical Arrhythmia & Cardiac Resuscitation",
-                "distanceKm": 3.8,
-                "phone": "+91 11 2692 5858",
-                "openNow": True,
-            },
-            {
-                "name": "Max Super Speciality Emergency",
-                "specialty": "Advanced Cardiac Life Support (ACLS)",
-                "distanceKm": 5.1,
-                "phone": "+91 11 2651 5050",
-                "openNow": True,
-            }
-        ]
+        from places_service import fetch_real_nearby_facilities
+        result = fetch_real_nearby_facilities(
+            lat=lat,
+            lng=lng,
+            radius_km=radius,
+            facility_type=facility_type,
+            limit=limit
+        )
 
-        return jsonify({
-            "status": "success",
-            "facilities": facilities
-        })
+        return jsonify(result)
     except Exception as err:
-        return jsonify({"status": "error", "message": str(err)}), 500
+        return jsonify({"status": "error", "message": str(err), "facilities": []}), 500
 
 
 # =========================================================================
