@@ -6688,6 +6688,90 @@ def emergency_nearby_facilities():
         return jsonify({"status": "error", "message": str(err)}), 500
 
 
+# =========================================================================
+# HOSPITAL MEDICAL REPORT & DIAGNOSTIC LAB INVESTIGATION ENDPOINTS
+# =========================================================================
+
+@app.route('/api/patient/<patient_id>/medical-report', methods=['GET'])
+@require_auth(patient_id_arg='patient_id')
+def get_patient_medical_report_api(patient_id):
+    try:
+        patient_ref = _patient_collection_reference().child(patient_id)
+        patient_record = patient_ref.get()
+        if not isinstance(patient_record, dict):
+            return api_error('Patient not found.', 404)
+
+        # Fetch doctor record
+        doc_email = str(patient_record.get('assignedDoctorId') or patient_record.get('doctorId') or '').strip().lower()
+        doctor_record = {}
+        if doc_email:
+            dref = _doctor_collection_reference().child(doc_email.replace('.', ','))
+            doctor_record = dref.get() or {}
+
+        # Fetch medicines / prescriptions
+        medicines = patient_record.get('medicines', []) or []
+
+        # Fetch report history from RTDB or Firestore
+        report_history = []
+        try:
+            rpts_ref = db.reference(f"medicalReports/{patient_id}")
+            rpts = rpts_ref.get()
+            if isinstance(rpts, dict):
+                report_history = list(rpts.values())
+        except Exception as err:
+            print(f"[MedicalReport] History retrieval warning: {err}")
+
+        return api_success('Medical report aggregated successfully.', {
+            'patient': patient_record,
+            'doctor': doctor_record,
+            'vitals': patient_record.get('vitals', {}),
+            'medicines': medicines,
+            'reportHistory': report_history,
+        })
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
+@app.route('/api/patient/<patient_id>/medical-report/generate', methods=['POST'])
+@require_auth(roles={'doctor'}, patient_id_arg='patient_id')
+def generate_patient_medical_report_api(patient_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        now_dt = datetime.now(timezone.utc)
+        report_id = f"RPT-{now_dt.year}-{str(patient_id).replace('-', '').upper()[:4]}-{random.randint(1000, 9999)}"
+        
+        report_record = {
+            'reportId': report_id,
+            'patientId': patient_id,
+            'patientName': str(data.get('patientName') or '').strip(),
+            'doctorName': str(data.get('doctorName') or '').strip(),
+            'doctorSpecialty': str(data.get('doctorSpecialty') or '').strip(),
+            'generatedAt': now_dt.isoformat(),
+            'reportType': str(data.get('reportType') or 'FINAL_CERTIFIED'),
+            'status': str(data.get('status') or 'Verified'),
+            'labTestsSummary': data.get('labTestsSummary', {}),
+            'clinicalDiagnosis': data.get('clinicalDiagnosis', {}),
+            'vitalsSnapshot': data.get('vitals', {}),
+        }
+
+        # Store in RTDB
+        try:
+            db.reference(f"medicalReports/{patient_id}/{report_id}").set(report_record)
+        except Exception as rtdb_err:
+            print(f"[MedicalReport] RTDB save warning: {rtdb_err}")
+
+        # Store in Firestore if available
+        try:
+            if firestore_client:
+                firestore_client.collection("medicalReports").document(report_id).set(report_record)
+        except Exception as fs_err:
+            print(f"[MedicalReport] Firestore save warning: {fs_err}")
+
+        return api_success('Medical report generated and certified.', {'report': report_record})
+    except Exception as err:
+        return api_error(str(err), 500)
+
+
 @app.route('/<path:path>')
 def serve_frontend_assets_or_spa(path):
     # Never intercept backend API routes

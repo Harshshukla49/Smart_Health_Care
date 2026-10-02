@@ -6,6 +6,7 @@ import {
   ChevronDown,
   Download,
   Droplets,
+  Eye,
   FileCheck2,
   FileText,
   Gauge,
@@ -20,6 +21,7 @@ import {
 } from 'lucide-react';
 import { Card } from './Card';
 import toast from 'react-hot-toast';
+import { MedicalReportModal } from './MedicalReportModal';
 
 /**
  * CLINICAL THRESHOLD ENGINE
@@ -107,6 +109,7 @@ export function ClinicalReportSection({
 }) {
   const [activeAlertFilter, setActiveAlertFilter] = useState('all');
   const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+  const [showHospitalReportModal, setShowHospitalReportModal] = useState(false);
 
   // Dynamic formatted report generation date
   const reportGeneratedDate = useMemo(() => {
@@ -310,8 +313,7 @@ export function ClinicalReportSection({
     if (onPrint) {
       onPrint();
     } else {
-      toast.success('Preparing Clinical Report for printing...');
-      window.print();
+      setShowHospitalReportModal(true);
     }
   };
 
@@ -319,8 +321,7 @@ export function ClinicalReportSection({
     if (onDownloadPdf) {
       onDownloadPdf();
     } else {
-      toast.success('Generating PDF document via print dialog...');
-      window.print();
+      setShowHospitalReportModal(true);
     }
   };
 
@@ -367,8 +368,18 @@ export function ClinicalReportSection({
           </div>
         </div>
 
-        {/* Action Buttons: Compact, Professional, Subtle Medical Blue */}
+        {/* Action Buttons: Preview PDF, Download, Print */}
         <div className="flex items-center gap-2 print:hidden shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowHospitalReportModal(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-sky-300 bg-sky-50 hover:bg-sky-100 px-3.5 py-2 text-xs font-bold text-sky-800 shadow-2xs transition active:scale-95"
+            title="Preview full hospital medical report document"
+          >
+            <Eye className="h-3.5 w-3.5 text-sky-600" />
+            <span>Preview Hospital Report</span>
+          </button>
+
           <button
             type="button"
             onClick={handleDownloadPdfClick}
@@ -949,6 +960,38 @@ export function ClinicalReportSection({
           )}
         </div>
       </Card>
+
+      {/* Full Hospital Medical Report PDF Preview / Action Modal */}
+      {showHospitalReportModal && (
+        <MedicalReportModal
+          isOpen={showHospitalReportModal}
+          onClose={() => setShowHospitalReportModal(false)}
+          patient={{
+            id: currentPatientId,
+            patientId: currentPatientId,
+            name: currentPatientName,
+            age: effectiveAge,
+            gender: effectiveGender,
+            heartRate,
+            spo2,
+            temperature,
+            bloodPressure,
+            status: overallStatus.level,
+            prediction: { status: overallStatus.level, risk },
+          }}
+          doctor={{
+            name: attendingDoctorName,
+            specialty: attendingDoctorSpecialty,
+          }}
+          vitals={{
+            heartRate,
+            spo2,
+            temperature,
+            bloodPressure,
+            ecgData,
+          }}
+        />
+      )}
     </section>
   );
 }

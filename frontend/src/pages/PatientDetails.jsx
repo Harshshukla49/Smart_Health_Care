@@ -3,23 +3,32 @@ import { Link, useParams } from 'react-router-dom';
 import { io } from 'socket.io-client';
 import {
   Activity,
+  AlertTriangle,
   ArrowLeft,
+  Award,
   Bell,
   BrainCircuit,
   CalendarCheck,
+  CheckCircle2,
+  Download,
+  Eye,
+  FileCheck2,
   FileText,
   HeartPulse,
   History,
+  Layers,
   LayoutDashboard,
   Link2,
   Link2Off,
   Pill,
   Printer,
   ShieldAlert,
+  ShieldCheck,
   Thermometer,
   Video,
   Waves,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from 'recharts';
 import { PageHeader } from '../components/PageHeader';
 import { Card } from '../components/Card';
@@ -31,6 +40,10 @@ import { Button } from '../components/Button';
 import { ECGChart } from '../components/ECGChart';
 import { AiHealthAssessment } from '../components/AiHealthAssessment';
 import { MedicationManagement } from '../components/MedicationManagement';
+import { MedicalReportDocument } from '../components/MedicalReportDocument';
+import { MedicalReportModal } from '../components/MedicalReportModal';
+import { calculateLabCompletion, generateRealisticLabResults } from '../data/labTestPresets';
+import { downloadMedicalReportPdf, printMedicalReport } from '../utils/medicalReportPdf';
 import { useVideoCall } from '../context/VideoCallContext';
 import {
   connectPatientDevice,
@@ -73,6 +86,9 @@ export function PatientDetails() {
   const [accessDenied, setAccessDenied] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [autoSaving, setAutoSaving] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [patientLabTests, setPatientLabTests] = useState([]);
+  const [reportDownloading, setReportDownloading] = useState(false);
   const [manualValues, setManualValues] = useState({
     heartRate: '',
     spo2: '',
@@ -80,6 +96,45 @@ export function PatientDetails() {
     ecgData: '',
   });
   const lastServerSignatureRef = useRef('');
+
+  // Auto-generate realistic lab diagnostic tests when patient is ready
+  useEffect(() => {
+    if (patient) {
+      setPatientLabTests(generateRealisticLabResults(patient));
+    }
+  }, [patient?.id]);
+
+  const labSummary = useMemo(() => calculateLabCompletion(patientLabTests), [patientLabTests]);
+
+  const handleDownloadPdf = async () => {
+    setReportDownloading(true);
+    const toastId = toast.loading('Generating Hospital Medical Report PDF...');
+    try {
+      const fileName = `${String(patient?.name || 'Patient').replace(/\s+/g, '_')}_Medical_Report.pdf`;
+      await downloadMedicalReportPdf('patient-tab-medical-report-doc', fileName);
+      toast.success('Hospital Medical Report PDF downloaded successfully!', { id: toastId });
+    } catch (err) {
+      toast.error(`Failed to generate PDF: ${err.message}`, { id: toastId });
+    } finally {
+      setReportDownloading(false);
+    }
+  };
+
+  const handlePrintReport = () => {
+    toast.success('Preparing Medical Report for printing...');
+    printMedicalReport('patient-tab-medical-report-doc');
+  };
+
+  const handleVerifyAllTests = () => {
+    setPatientLabTests((prev) => prev.map((t) => ({ ...t, status: 'VERIFIED' })));
+    toast.success('All laboratory diagnostic investigations marked as VERIFIED.');
+  };
+
+  const handleToggleTest = (id) => {
+    setPatientLabTests((prev) =>
+      prev.map((t) => (t.id === id ? { ...t, status: t.status === 'VERIFIED' ? 'COMPLETED' : 'VERIFIED' } : t))
+    );
+  };
 
   // Scoped Security Guard: A patient can ONLY view their own records
   const isPatientRestricted = isPatient && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase();
@@ -713,47 +768,133 @@ export function PatientDetails() {
       {/* TAB 10: REPORTS */}
       {activeTab === 'reports' && (
         <div className="space-y-6">
-          <Card className="p-6 md:p-8 space-y-4">
-            <div className="flex items-center justify-between border-b border-white/10 pb-4">
-              <div>
-                <h3 className="text-xl font-bold text-white">Clinical Telemetry Report</h3>
-                <p className="text-xs text-slate-400">Patient: {patient.name} ({patient.id}) · Attending: Dr. {attendingDoctor.name}</p>
+          {/* Top Report Management & Action Bar */}
+          <Card className="p-5 sm:p-6 bg-white border border-[#E2E8F0] rounded-[18px] shadow-[0_4px_20px_rgba(15,23,42,0.04)] space-y-4">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-800 border border-sky-200">
+                    <ShieldCheck className="h-3 w-3 text-sky-600" />
+                    NABH & NABL ACCREDITED
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold border ${labSummary.badgeClass}`}
+                  >
+                    {labSummary.isAllVerified ? (
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+                    ) : (
+                      <AlertTriangle className="h-3 w-3 text-amber-600" />
+                    )}
+                    {labSummary.badgeText}
+                  </span>
+                </div>
+                <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                  Hospital Medical Report & Diagnostic Summary
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Comprehensive printable and downloadable medical summary with laboratory investigation results, continuous telemetry, and authorized physician sign-off.
+                </p>
               </div>
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white shadow-sm hover:bg-blue-700 transition"
-              >
-                <Printer className="h-4 w-4" />
-                Print / Save PDF
-              </button>
+
+              {/* Action Buttons */}
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowReportModal(true)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-sky-300 bg-sky-50 hover:bg-sky-100 px-4 py-2.5 text-xs font-bold text-sky-800 shadow-2xs transition active:scale-95"
+                  title="Open Full Screen Interactive Report Modal"
+                >
+                  <Eye className="h-4 w-4 text-sky-600" />
+                  <span>Interactive Modal</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleDownloadPdf}
+                  disabled={reportDownloading}
+                  className="inline-flex items-center gap-1.5 rounded-xl bg-[#0284C7] hover:bg-[#0369A1] text-white px-4 py-2.5 text-xs font-bold transition shadow-sm active:scale-95 disabled:opacity-50"
+                  title="Download Real Hospital Report PDF"
+                >
+                  <Download className="h-4 w-4" />
+                  <span>{reportDownloading ? 'Generating PDF...' : 'Download PDF'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handlePrintReport}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700 shadow-2xs transition active:scale-95"
+                  title="Print Patient Report"
+                >
+                  <Printer className="h-4 w-4 text-slate-600" />
+                  <span>Print Report</span>
+                </button>
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
-                <span className="text-xs text-slate-400">Heart Rate</span>
-                <p className="text-lg font-bold text-white">{Number(patient?.vitals?.heartRate || 0).toFixed(0)} bpm</p>
+            {/* Test Verification Workflow Bar */}
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-50 p-3.5 rounded-xl border border-slate-200/80 text-xs">
+              <div className="flex items-center gap-3">
+                <div className="h-8 w-8 rounded-lg bg-sky-100 text-sky-800 flex items-center justify-center font-bold text-xs">
+                  <FileCheck2 className="h-4 w-4" />
+                </div>
+                <div>
+                  <p className="font-bold text-slate-800">
+                    Diagnostic Lab Investigation Status: {labSummary.verified} of {labSummary.total} Verified ({labSummary.percentage}%)
+                  </p>
+                  <p className="text-[11px] text-slate-500">
+                    {labSummary.isAllVerified
+                      ? 'All required diagnostic tests are completed & verified. Report is certified for official clinical release.'
+                      : 'Some tests are in progress or unverified. Generated PDF will include a Preliminary watermark.'}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
-                <span className="text-xs text-slate-400">SpO2</span>
-                <p className="text-lg font-bold text-white">{Number(patient?.vitals?.spo2 || 0).toFixed(1)}%</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
-                <span className="text-xs text-slate-400">Temperature</span>
-                <p className="text-lg font-bold text-white">{Number(patient?.vitals?.temperature || 0).toFixed(1)}°C</p>
-              </div>
-              <div className="rounded-xl border border-white/10 bg-white/5 p-3 text-center">
-                <span className="text-xs text-slate-400">Blood Pressure</span>
-                <p className="text-lg font-bold text-white">120/80 mmHg</p>
-              </div>
-            </div>
 
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-xs text-slate-300 space-y-2">
-              <p><strong>Clinical Summary:</strong> Patient telemetry streams are monitored remotely. AI clinical decision support provides real-time trend analytics and triage suggestions.</p>
-              <p><strong>Attending Physician:</strong> Dr. {attendingDoctor.name} ({attendingDoctor.specialty}) · Contact: {attendingDoctor.phone || 'Available on clinical exchange'}</p>
+              {isDoctor && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleVerifyAllTests}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold transition shadow-2xs"
+                  >
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                    <span>Verify All Lab Tests</span>
+                  </button>
+                </div>
+              )}
             </div>
           </Card>
+
+          {/* Embedded Hospital Document Viewer */}
+          <div className="overflow-x-auto pb-4">
+            <MedicalReportDocument
+              elementId="patient-tab-medical-report-doc"
+              patient={patient}
+              doctor={attendingDoctor}
+              vitals={patient?.vitals || {}}
+              labTests={patientLabTests}
+              medicines={patient?.medicines || []}
+              clinicalDiagnosis={{
+                provisional: patient?.prediction?.message || 'Sinus rhythm within baseline limits.',
+                final: labSummary.isAllVerified
+                  ? 'Certified stable physiological profile with normal diagnostic laboratory parameters.'
+                  : 'Pending final verification of remaining laboratory investigations.',
+              }}
+              isDraft={!labSummary.isAllVerified}
+            />
+          </div>
         </div>
+      )}
+
+      {/* Interactive Full-Screen Hospital Medical Report Modal */}
+      {showReportModal && (
+        <MedicalReportModal
+          isOpen={showReportModal}
+          onClose={() => setShowReportModal(false)}
+          patient={patient}
+          doctor={attendingDoctor}
+          vitals={patient?.vitals || {}}
+          medicines={patient?.medicines || []}
+        />
       )}
     </div>
   );

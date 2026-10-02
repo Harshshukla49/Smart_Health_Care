@@ -851,3 +851,63 @@ button {
   background-size: 20px 20px;
 }
 
+/* ==========================================
+   AUTHENTIC HOSPITAL MEDICAL REPORT PRINT STYLES
+   ========================================== */
+@media print {
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  @page {
+    size: A4 portrait;
+    margin: 8mm 6mm 10mm 6mm;
+  }
+
+  body {
+    background: #ffffff !important;
+    background-image: none !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* Hide non-printable app UI (Sidebars, Floating buttons, Modals overlay backdrop) */
+  nav,
+  aside,
+  header:not(.report-header),
+  button:not(.report-btn),
+  .sidebar,
+  .print\\:hidden,
+  .dashboard-back-link {
+    display: none !important;
+  }
+
+  /* Ensure the report document container spans cleanly without margins or scrollbars */
+  #printable-medical-report,
+  #modal-medical-report-doc,
+  #patient-tab-medical-report-doc {
+    box-shadow: none !important;
+    border: none !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: 0 auto !important;
+    padding: 0 !important;
+  }
+
+  /* Avoid page breaks inside crucial medical sections */
+  .page-break-avoid,
+  table,
+  section {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+
+  table tr {
+    break-inside: avoid !important;
+    page-break-inside: avoid !important;
+  }
+}
+
+

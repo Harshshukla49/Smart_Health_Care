@@ -1110,8 +1110,6 @@ function DashboardBody({ liveVitals }) {
             risk={risk}
             risk_score={risk_score}
             currentLastUpdate={currentLastUpdate}
-            onPrint={handlePrintReport}
-            onDownloadPdf={handlePrintReport}
           />
 
           {/* =======================================================

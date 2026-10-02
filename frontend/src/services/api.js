@@ -897,4 +897,21 @@ export const getDoctorDevices = async () => {
   return Array.isArray(data?.devices) ? data.devices : [];
 };
 
+/**
+ * Get aggregated medical report data for patient
+ */
+export const getPatientMedicalReportApi = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/medical-report`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Generate and certify a new patient medical report snapshot
+ */
+export const generatePatientMedicalReportApi = async (patientId, payload) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(toText(patientId))}/medical-report/generate`, payload);
+  return unwrapEnvelope(response);
+};
+
+
 
