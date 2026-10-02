@@ -20,7 +20,7 @@ import {
 import toast from 'react-hot-toast';
 import { MedicalReportDocument } from './MedicalReportDocument';
 import { calculateLabCompletion, generateRealisticLabResults } from '../data/labTestPresets';
-import { downloadMedicalReportPdf, printMedicalReport } from '../utils/medicalReportPdf';
+import { downloadMedicalReportPdf, generateVectorMedicalReportPdf, printMedicalReport } from '../utils/medicalReportPdf';
 import { getAuthSession } from '../utils/auth';
 
 export function MedicalReportModal({
@@ -122,10 +122,18 @@ export function MedicalReportModal({
   // Handle PDF Download
   const handleDownloadPdf = async () => {
     setDownloading(true);
-    const toastId = toast.loading('Generating authentic Medical Report PDF...');
+    const toastId = toast.loading('Generating Hospital Medical Report PDF...');
     try {
       const fileName = `${patientName.replace(/\s+/g, '_')}_Medical_Report_${new Date().toISOString().slice(0, 10)}.pdf`;
-      await downloadMedicalReportPdf('modal-medical-report-doc', fileName);
+      generateVectorMedicalReportPdf({
+        patient,
+        doctor,
+        vitals,
+        labTests,
+        medicines,
+        clinicalDiagnosis,
+        fileName,
+      });
       toast.success('Medical Report PDF downloaded successfully!', { id: toastId });
 
       // Append to local report history

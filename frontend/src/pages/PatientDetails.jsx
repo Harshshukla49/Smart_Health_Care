@@ -43,7 +43,7 @@ import { MedicationManagement } from '../components/MedicationManagement';
 import { MedicalReportDocument } from '../components/MedicalReportDocument';
 import { MedicalReportModal } from '../components/MedicalReportModal';
 import { calculateLabCompletion, generateRealisticLabResults } from '../data/labTestPresets';
-import { downloadMedicalReportPdf, printMedicalReport } from '../utils/medicalReportPdf';
+import { downloadMedicalReportPdf, generateVectorMedicalReportPdf, printMedicalReport } from '../utils/medicalReportPdf';
 import { useVideoCall } from '../context/VideoCallContext';
 import {
   connectPatientDevice,
@@ -111,7 +111,20 @@ export function PatientDetails() {
     const toastId = toast.loading('Generating Hospital Medical Report PDF...');
     try {
       const fileName = `${String(patient?.name || 'Patient').replace(/\s+/g, '_')}_Medical_Report.pdf`;
-      await downloadMedicalReportPdf('patient-tab-medical-report-doc', fileName);
+      generateVectorMedicalReportPdf({
+        patient,
+        doctor: attendingDoctor,
+        vitals: patient?.vitals || {},
+        labTests: patientLabTests,
+        medicines: patient?.medicines || [],
+        clinicalDiagnosis: {
+          provisional: patient?.prediction?.message || 'Sinus rhythm within baseline limits.',
+          final: labSummary.isAllVerified
+            ? 'Certified stable physiological profile with normal diagnostic laboratory parameters.'
+            : 'Pending final verification of remaining laboratory investigations.',
+        },
+        fileName,
+      });
       toast.success('Hospital Medical Report PDF downloaded successfully!', { id: toastId });
     } catch (err) {
       toast.error(`Failed to generate PDF: ${err.message}`, { id: toastId });
