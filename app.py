@@ -148,10 +148,11 @@ from functools import wraps
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
+import io
+import csv
 from dotenv import load_dotenv
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, Response
 from flask_cors import CORS
-from flask import Flask, jsonify, request
 from flask_socketio import SocketIO, emit, join_room
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -1345,6 +1346,97 @@ def _password_reset_reference():
 
 def _admin_collection_reference():
     return db.reference('admins')
+
+
+def _hospitals_collection_reference():
+    return db.reference('hospitals')
+
+
+def _appointments_collection_reference():
+    return db.reference('appointments')
+
+
+def _security_audit_reference():
+    return db.reference('security_audit_logs')
+
+
+def _patient_history_reference(patient_id):
+    safe_pid = str(patient_id or '').strip().replace('.', ',').replace('/', '_')
+    return db.reference(f'patientHistory/{safe_pid}')
+
+
+def _log_security_event(actor_payload=None, action='UNKNOWN', target_type='', target_id='', hospital_id='', details=''):
+    try:
+        actor = actor_payload if isinstance(actor_payload, dict) else (_read_auth_payload() or {})
+        actor_role = str(actor.get('role') or 'anonymous').strip().lower()
+        actor_id = str(actor.get('adminId') or actor.get('id') or actor.get('doctorId') or actor.get('patientId') or actor.get('email') or 'anonymous').strip()
+        actor_email = str(actor.get('email') or '').strip().lower()
+        resolved_hosp = str(hospital_id or actor.get('hospitalId') or '').strip()
+
+        event_id = f"sec-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        event_record = {
+            'id': event_id,
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'action': str(action).strip().upper(),
+            'actorId': actor_id,
+            'actorRole': actor_role,
+            'actorEmail': actor_email,
+            'targetType': str(target_type).strip(),
+            'targetId': str(target_id).strip(),
+            'hospitalId': resolved_hosp,
+            'details': str(details).strip(),
+            'ipAddress': _get_client_ip(),
+        }
+
+        _security_audit_reference().child(event_id).set(event_record)
+        return event_record
+    except Exception as e:
+        print(f"[SecurityAudit] Warning: Logging failed: {e}")
+        return None
+
+
+def _log_patient_history(patient_id, event_type, details, changed_by=None):
+    try:
+        actor = changed_by if isinstance(changed_by, dict) else (_read_auth_payload() or {})
+        history_id = f"hist-{int(time.time() * 1000)}-{secrets.token_hex(4)}"
+        entry = {
+            'id': history_id,
+            'patientId': str(patient_id).strip(),
+            'eventType': str(event_type).strip().upper(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
+            'changedBy': actor.get('email') or actor.get('adminId') or actor.get('id') or 'system',
+            'changedByRole': actor.get('role') or 'system',
+            'details': details if isinstance(details, dict) else {'message': str(details)},
+        }
+        _patient_history_reference(patient_id).child(history_id).set(entry)
+        return entry
+    except Exception as e:
+        print(f"[PatientHistory] Warning: Logging failed: {e}")
+        return None
+
+
+def _ensure_default_hospital():
+    try:
+        hosp_ref = _hospitals_collection_reference()
+        hosp_data = hosp_ref.get()
+        if not hosp_data or not isinstance(hosp_data, dict):
+            default_hosp_id = "HOSP-CITY-01"
+            hosp_ref.child(default_hosp_id).set({
+                'id': default_hosp_id,
+                'hospitalId': default_hosp_id,
+                'name': 'City General Medical Center',
+                'address': '100 Healthcare Boulevard, Suite 400',
+                'city': 'New Delhi',
+                'state': 'Delhi',
+                'phone': '+911140001000',
+                'email': 'admin@citygeneral.org',
+                'departments': ['Cardiology', 'General Medicine', 'Neurology', 'Pulmonology', 'Emergency Care', 'Pediatrics'],
+                'isActive': True,
+                'createdAt': datetime.now(timezone.utc).isoformat(),
+            })
+            print(f"[Bootstrap] Initialized default hospital: {default_hosp_id}")
+    except Exception as e:
+        print(f"[Bootstrap] Default hospital notice: {e}")
 
 
 _RATE_LIMIT_STORE = {}
@@ -3478,6 +3570,1136 @@ def get_admin_system_stats():
                 'role': role,
                 'hospitalId': admin_hosp,
             }
+        })
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+# ============================================================================
+# MULTI-HOSPITAL ADMIN SYSTEM & PATIENT MANAGEMENT ROUTES
+# ============================================================================
+
+@app.route('/api/admin/hospitals', methods=['POST'])
+@require_auth(roles={'super_admin'})
+def create_hospital():
+    try:
+        requester = _read_auth_payload()
+        data = request.get_json(silent=True) or {}
+        name = str(data.get('name') or '').strip()
+        if not name:
+            return api_error('Hospital name is required.', 400)
+
+        custom_id = str(data.get('hospitalId') or '').strip().upper()
+        if custom_id:
+            hosp_id = custom_id
+        else:
+            slug = re.sub(r'[^A-Za-z0-9]', '', name)[:6].upper() or 'HOSP'
+            hosp_id = f"HOSP-{slug}-{secrets.token_hex(2).upper()}"
+
+        existing = _hospitals_collection_reference().child(hosp_id).get()
+        if isinstance(existing, dict):
+            return api_error(f'Hospital with ID {hosp_id} already exists.', 409)
+
+        departments = data.get('departments')
+        if isinstance(departments, str):
+            departments = [d.strip() for d in departments.split(',') if d.strip()]
+        elif not isinstance(departments, list) or not departments:
+            departments = ['Cardiology', 'General Medicine', 'Emergency Care', 'Pediatrics', 'Neurology']
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        hospital_record = {
+            'id': hosp_id,
+            'hospitalId': hosp_id,
+            'name': name,
+            'address': str(data.get('address') or '').strip(),
+            'city': str(data.get('city') or '').strip(),
+            'state': str(data.get('state') or '').strip(),
+            'phone': str(data.get('phone') or '').strip(),
+            'email': str(data.get('email') or '').strip().lower(),
+            'departments': departments,
+            'isActive': True,
+            'status': 'active',
+            'createdAt': now_iso,
+            'updatedAt': now_iso,
+        }
+
+        _hospitals_collection_reference().child(hosp_id).set(hospital_record)
+        _log_security_event(requester, 'HOSPITAL_CREATED', 'hospital', hosp_id, hosp_id, f"Created hospital '{name}' ({hosp_id})")
+
+        return api_success('Hospital created successfully.', {'hospital': hospital_record}, 201)
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/hospitals', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def list_hospitals():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        hospitals_raw = _hospitals_collection_reference().get() or {}
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+        appointments_raw = _appointments_collection_reference().get() or {}
+
+        hospitals = []
+        if isinstance(hospitals_raw, dict):
+            for k, h in hospitals_raw.items():
+                if not isinstance(h, dict):
+                    continue
+                h_id = str(h.get('hospitalId') or h.get('id') or k).strip()
+                h_id_lower = h_id.lower()
+
+                if role == 'hospital_admin' and h_id_lower != admin_hosp:
+                    continue
+
+                doc_count = sum(1 for d in doctors_raw.values() if isinstance(d, dict) and str(d.get('hospitalId') or '').strip().lower() == h_id_lower)
+                active_doc_count = sum(1 for d in doctors_raw.values() if isinstance(d, dict) and str(d.get('hospitalId') or '').strip().lower() == h_id_lower and d.get('isActive') is not False and d.get('status') != 'deactivated')
+                pat_count = sum(1 for p in patients_raw.values() if isinstance(p, dict) and str(p.get('hospitalId') or '').strip().lower() == h_id_lower)
+                apt_count = sum(1 for a in appointments_raw.values() if isinstance(a, dict) and str(a.get('hospitalId') or '').strip().lower() == h_id_lower)
+
+                item = dict(h)
+                item['id'] = h_id
+                item['hospitalId'] = h_id
+                item['doctorCount'] = doc_count
+                item['activeDoctorCount'] = active_doc_count
+                item['patientCount'] = pat_count
+                item['appointmentCount'] = apt_count
+                hospitals.append(item)
+
+        return api_success('Hospitals fetched successfully.', {'hospitals': hospitals})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/hospitals/<hospital_id>', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_hospital(hospital_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        if role == 'hospital_admin' and str(hospital_id).strip().lower() != admin_hosp:
+            return api_error('Forbidden. Hospital administrators can only view their own hospital.', 403)
+
+        record = _hospitals_collection_reference().child(hospital_id).get()
+        if not isinstance(record, dict):
+            all_h = _hospitals_collection_reference().get() or {}
+            if isinstance(all_h, dict):
+                for k, h in all_h.items():
+                    if isinstance(h, dict) and str(h.get('hospitalId') or h.get('id') or k).strip().lower() == str(hospital_id).strip().lower():
+                        record = h
+                        break
+
+        if not isinstance(record, dict):
+            return api_error('Hospital not found.', 404)
+
+        h_id_lower = str(record.get('hospitalId') or record.get('id') or hospital_id).strip().lower()
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+        appointments_raw = _appointments_collection_reference().get() or {}
+
+        doc_count = sum(1 for d in doctors_raw.values() if isinstance(d, dict) and str(d.get('hospitalId') or '').strip().lower() == h_id_lower)
+        pat_count = sum(1 for p in patients_raw.values() if isinstance(p, dict) and str(p.get('hospitalId') or '').strip().lower() == h_id_lower)
+        apt_count = sum(1 for a in appointments_raw.values() if isinstance(a, dict) and str(a.get('hospitalId') or '').strip().lower() == h_id_lower)
+
+        resp_data = dict(record)
+        resp_data['doctorCount'] = doc_count
+        resp_data['patientCount'] = pat_count
+        resp_data['appointmentCount'] = apt_count
+
+        return api_success('Hospital details fetched successfully.', {'hospital': resp_data})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/hospitals/<hospital_id>', methods=['PUT'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def update_hospital(hospital_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        if role == 'hospital_admin' and str(hospital_id).strip().lower() != admin_hosp:
+            return api_error('Forbidden. Hospital administrators can only edit their own hospital.', 403)
+
+        ref = _hospitals_collection_reference().child(hospital_id)
+        record = ref.get()
+        if not isinstance(record, dict):
+            all_h = _hospitals_collection_reference().get() or {}
+            if isinstance(all_h, dict):
+                for k, h in all_h.items():
+                    if isinstance(h, dict) and str(h.get('hospitalId') or h.get('id') or k).strip().lower() == str(hospital_id).strip().lower():
+                        record = h
+                        ref = _hospitals_collection_reference().child(k)
+                        break
+
+        if not isinstance(record, dict):
+            return api_error('Hospital not found.', 404)
+
+        data = request.get_json(silent=True) or {}
+        updates = {'updatedAt': datetime.now(timezone.utc).isoformat()}
+        for field in ('name', 'address', 'city', 'state', 'phone', 'email'):
+            if field in data and data[field] is not None:
+                updates[field] = str(data[field]).strip()
+
+        if 'departments' in data:
+            depts = data['departments']
+            if isinstance(depts, str):
+                updates['departments'] = [d.strip() for d in depts.split(',') if d.strip()]
+            elif isinstance(depts, list):
+                updates['departments'] = [str(d).strip() for d in depts if str(d).strip()]
+
+        ref.update(updates)
+        updated_record = {**record, **updates}
+
+        _log_security_event(requester, 'HOSPITAL_UPDATED', 'hospital', hospital_id, hospital_id, "Updated hospital details")
+        return api_success('Hospital updated successfully.', {'hospital': updated_record})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/hospitals/<hospital_id>/toggle-status', methods=['POST'])
+@require_auth(roles={'super_admin'})
+def toggle_hospital_status(hospital_id):
+    try:
+        requester = _read_auth_payload()
+        ref = _hospitals_collection_reference().child(hospital_id)
+        record = ref.get()
+        if not isinstance(record, dict):
+            all_h = _hospitals_collection_reference().get() or {}
+            if isinstance(all_h, dict):
+                for k, h in all_h.items():
+                    if isinstance(h, dict) and str(h.get('hospitalId') or h.get('id') or k).strip().lower() == str(hospital_id).strip().lower():
+                        record = h
+                        ref = _hospitals_collection_reference().child(k)
+                        break
+
+        if not isinstance(record, dict):
+            return api_error('Hospital not found.', 404)
+
+        data = request.get_json(silent=True) or {}
+        if 'isActive' in data:
+            new_active = bool(data['isActive'])
+        else:
+            new_active = not (record.get('isActive') is not False and record.get('status') != 'deactivated')
+
+        status_str = 'active' if new_active else 'deactivated'
+        ref.update({
+            'isActive': new_active,
+            'status': status_str,
+            'updatedAt': datetime.now(timezone.utc).isoformat(),
+        })
+
+        _log_security_event(requester, 'HOSPITAL_STATUS_TOGGLED', 'hospital', hospital_id, hospital_id, f"Hospital status changed to {status_str}")
+        return api_success(f'Hospital {status_str} successfully.', {'hospitalId': hospital_id, 'isActive': new_active, 'status': status_str})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/metrics', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_admin_metrics():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        hospitals_raw = _hospitals_collection_reference().get() or {}
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+        appointments_raw = _appointments_collection_reference().get() or {}
+        emergencies_raw = db.reference('emergencyAlerts').get() or {}
+
+        doctors = [d for d in doctors_raw.values() if isinstance(d, dict)]
+        if role == 'hospital_admin':
+            doctors = [d for d in doctors if str(d.get('hospitalId') or '').strip().lower() == admin_hosp]
+
+        patients = [p for p in patients_raw.values() if isinstance(p, dict)]
+        if role == 'hospital_admin':
+            doc_emails = {str(d.get('email') or d.get('doctorId') or '').strip().lower() for d in doctors}
+            patients = [p for p in patients if str(p.get('hospitalId') or '').strip().lower() == admin_hosp or str(p.get('assignedDoctorId') or p.get('doctorId') or '').strip().lower() in doc_emails]
+
+        appointments = [a for a in appointments_raw.values() if isinstance(a, dict)]
+        if role == 'hospital_admin':
+            appointments = [a for a in appointments if str(a.get('hospitalId') or '').strip().lower() == admin_hosp]
+
+        emergencies = [e for e in emergencies_raw.values() if isinstance(e, dict)]
+        if role == 'hospital_admin':
+            emergencies = [e for e in emergencies if str(e.get('hospitalId') or '').strip().lower() == admin_hosp]
+
+        total_doctors = len(doctors)
+        active_doctors = sum(1 for d in doctors if d.get('isActive') is not False and d.get('status') != 'deactivated')
+        deactivated_doctors = total_doctors - active_doctors
+
+        total_patients = len(patients)
+        active_patients = sum(1 for p in patients if p.get('isActive') is not False and p.get('status') != 'deactivated')
+        assigned_patients = sum(1 for p in patients if str(p.get('assignedDoctorId') or p.get('doctorId') or '').strip())
+
+        dept_counts = {}
+        for d in doctors:
+            dept = str(d.get('department') or d.get('specialty') or 'General').strip()
+            dept_counts[dept] = dept_counts.get(dept, 0) + 1
+
+        total_appointments = len(appointments)
+        scheduled_appointments = sum(1 for a in appointments if str(a.get('status') or '').lower() == 'scheduled')
+        completed_appointments = sum(1 for a in appointments if str(a.get('status') or '').lower() == 'completed')
+        cancelled_appointments = sum(1 for a in appointments if str(a.get('status') or '').lower() == 'cancelled')
+
+        total_emergencies = len(emergencies)
+        active_emergencies = sum(1 for e in emergencies if str(e.get('status') or '').upper() not in ('RESOLVED', 'DISMISSED'))
+
+        hospital_breakdowns = []
+        if role == 'super_admin' and isinstance(hospitals_raw, dict):
+            for k, h in hospitals_raw.items():
+                if not isinstance(h, dict):
+                    continue
+                hid = str(h.get('hospitalId') or h.get('id') or k).strip()
+                hid_lower = hid.lower()
+                h_docs = sum(1 for d in doctors_raw.values() if isinstance(d, dict) and str(d.get('hospitalId') or '').strip().lower() == hid_lower)
+                h_pats = sum(1 for p in patients_raw.values() if isinstance(p, dict) and str(p.get('hospitalId') or '').strip().lower() == hid_lower)
+                h_apts = sum(1 for a in appointments_raw.values() if isinstance(a, dict) and str(a.get('hospitalId') or '').strip().lower() == hid_lower)
+                h_emg = sum(1 for e in emergencies_raw.values() if isinstance(e, dict) and str(e.get('hospitalId') or '').strip().lower() == hid_lower)
+                hospital_breakdowns.append({
+                    'hospitalId': hid,
+                    'name': h.get('name') or hid,
+                    'city': h.get('city') or '',
+                    'isActive': h.get('isActive') is not False and h.get('status') != 'deactivated',
+                    'doctorCount': h_docs,
+                    'patientCount': h_pats,
+                    'appointmentCount': h_apts,
+                    'emergencyCount': h_emg,
+                })
+
+        metrics = {
+            'role': role,
+            'hospitalId': admin_hosp if role == 'hospital_admin' else 'ALL',
+            'doctors': {
+                'total': total_doctors,
+                'active': active_doctors,
+                'deactivated': deactivated_doctors,
+                'departmentBreakdown': dept_counts,
+            },
+            'patients': {
+                'total': total_patients,
+                'active': active_patients,
+                'assigned': assigned_patients,
+                'unassigned': total_patients - assigned_patients,
+            },
+            'appointments': {
+                'total': total_appointments,
+                'scheduled': scheduled_appointments,
+                'completed': completed_appointments,
+                'cancelled': cancelled_appointments,
+            },
+            'emergencies': {
+                'total': total_emergencies,
+                'active': active_emergencies,
+                'resolved': total_emergencies - active_emergencies,
+            },
+            'hospitals': hospital_breakdowns if role == 'super_admin' else None,
+            'totalHospitals': len(hospitals_raw) if role == 'super_admin' else 1,
+        }
+
+        return api_success('Metrics fetched successfully.', {'metrics': metrics})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/audit-logs', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_audit_logs():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        raw_logs = _security_audit_reference().get() or {}
+        logs = []
+        if isinstance(raw_logs, dict):
+            for k, log_item in raw_logs.items():
+                if not isinstance(log_item, dict):
+                    continue
+                if role == 'hospital_admin' and str(log_item.get('hospitalId') or '').strip().lower() != admin_hosp:
+                    continue
+                logs.append(log_item)
+
+        action_filter = str(request.args.get('action') or '').strip().upper()
+        search_term = str(request.args.get('search') or '').strip().lower()
+        if action_filter:
+            logs = [l for l in logs if str(l.get('action') or '').upper() == action_filter]
+        if search_term:
+            logs = [l for l in logs if (
+                search_term in str(l.get('actorEmail') or '').lower() or
+                search_term in str(l.get('details') or '').lower() or
+                search_term in str(l.get('targetId') or '').lower() or
+                search_term in str(l.get('action') or '').lower()
+            )]
+
+        logs.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+        limit = min(int(request.args.get('limit') or 100), 500)
+        return api_success('Audit logs fetched successfully.', {'logs': logs[:limit], 'total': len(logs)})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/audit-logs/export', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def export_audit_logs():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        raw_logs = _security_audit_reference().get() or {}
+        logs = []
+        if isinstance(raw_logs, dict):
+            for k, log_item in raw_logs.items():
+                if not isinstance(log_item, dict):
+                    continue
+                if role == 'hospital_admin' and str(log_item.get('hospitalId') or '').strip().lower() != admin_hosp:
+                    continue
+                logs.append(log_item)
+
+        logs.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['ID', 'Timestamp', 'Action', 'Actor ID', 'Actor Role', 'Actor Email', 'Target Type', 'Target ID', 'Hospital ID', 'IP Address', 'Details'])
+
+        for l in logs:
+            writer.writerow([
+                l.get('id', ''),
+                l.get('timestamp', ''),
+                l.get('action', ''),
+                l.get('actorId', ''),
+                l.get('actorRole', ''),
+                l.get('actorEmail', ''),
+                l.get('targetType', ''),
+                l.get('targetId', ''),
+                l.get('hospitalId', ''),
+                l.get('ipAddress', ''),
+                l.get('details', ''),
+            ])
+
+        _log_security_event(requester, 'AUDIT_LOGS_EXPORTED', 'audit_log', 'export', admin_hosp, f'Exported {len(logs)} audit log records')
+
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=security_audit_logs.csv'}
+        )
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/doctors', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_hospital_doctors():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+        requested_hosp = str(request.args.get('hospitalId') or '').strip().lower()
+
+        target_hosp = admin_hosp if role == 'hospital_admin' else requested_hosp
+
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+
+        doctors = []
+        if isinstance(doctors_raw, dict):
+            for k, doc in doctors_raw.items():
+                if not isinstance(doc, dict):
+                    continue
+                doc_hosp = str(doc.get('hospitalId') or '').strip().lower()
+                if target_hosp and doc_hosp != target_hosp:
+                    continue
+
+                item = dict(doc)
+                item.pop('passwordHash', None)
+                item.pop('password', None)
+                doc_id = str(item.get('id') or item.get('doctorId') or k)
+                item['id'] = doc_id
+                item['doctorId'] = doc_id
+
+                p_count = sum(1 for p in patients_raw.values() if isinstance(p, dict) and str(p.get('assignedDoctorId') or p.get('doctorId') or '').strip().lower() == doc_id.lower())
+                item['patientCount'] = p_count
+                doctors.append(item)
+
+        return api_success('Hospital doctors fetched successfully.', {'doctors': doctors})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/doctors/<doctor_id>', methods=['PUT'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def update_hospital_doctor(doctor_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        target_ref = None
+        doctor = None
+        safe_id = doctor_id.replace('.', ',')
+        direct = _doctor_collection_reference().child(safe_id).get()
+        if isinstance(direct, dict):
+            target_ref = _doctor_collection_reference().child(safe_id)
+            doctor = direct
+        else:
+            all_d = _doctor_collection_reference().get() or {}
+            if isinstance(all_d, dict):
+                for k, d in all_d.items():
+                    if isinstance(d, dict) and (d.get('id') == doctor_id or d.get('doctorId') == doctor_id or d.get('email') == doctor_id):
+                        target_ref = _doctor_collection_reference().child(k)
+                        doctor = d
+                        break
+
+        if not doctor or not target_ref:
+            return api_error('Doctor not found.', 404)
+
+        doc_hosp = str(doctor.get('hospitalId') or '').strip().lower()
+        if role == 'hospital_admin' and doc_hosp != admin_hosp:
+            return api_error('Forbidden. Hospital administrators can only modify doctors in their hospital.', 403)
+
+        data = request.get_json(silent=True) or {}
+        updates = {'updatedAt': datetime.now(timezone.utc).isoformat()}
+        for field in ('name', 'phone', 'department', 'specialty', 'qualification'):
+            if field in data and data[field] is not None:
+                updates[field] = str(data[field]).strip()
+
+        target_ref.update(updates)
+        updated_doctor = {**doctor, **updates}
+        updated_doctor.pop('passwordHash', None)
+        updated_doctor.pop('password', None)
+
+        _log_security_event(requester, 'DOCTOR_UPDATED', 'doctor', doctor_id, doc_hosp, f"Updated doctor details for {doctor_id}")
+        return api_success('Doctor updated successfully.', {'doctor': updated_doctor})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/departments', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_hospital_departments():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip()
+        hosp_id = admin_hosp if role == 'hospital_admin' else (str(request.args.get('hospitalId') or admin_hosp or 'HOSP-CITY-01').strip())
+
+        hosp = _hospitals_collection_reference().child(hosp_id).get()
+        departments = []
+        if isinstance(hosp, dict):
+            departments = hosp.get('departments') or []
+
+        if not departments:
+            departments = ['Cardiology', 'General Medicine', 'Neurology', 'Pulmonology', 'Emergency Care', 'Pediatrics']
+
+        return api_success('Departments fetched successfully.', {'departments': departments, 'hospitalId': hosp_id})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/departments', methods=['POST'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def update_hospital_departments():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip()
+
+        data = request.get_json(silent=True) or {}
+        target_hosp = admin_hosp if role == 'hospital_admin' else str(data.get('hospitalId') or admin_hosp or 'HOSP-CITY-01').strip()
+
+        departments = data.get('departments')
+        if isinstance(departments, str):
+            departments = [d.strip() for d in departments.split(',') if d.strip()]
+        elif not isinstance(departments, list):
+            return api_error('Departments must be a list of strings.', 400)
+
+        _hospitals_collection_reference().child(target_hosp).update({
+            'departments': departments,
+            'updatedAt': datetime.now(timezone.utc).isoformat(),
+        })
+
+        _log_security_event(requester, 'DEPARTMENTS_UPDATED', 'hospital', target_hosp, target_hosp, f"Updated departments: {', '.join(departments)}")
+        return api_success('Departments updated successfully.', {'departments': departments, 'hospitalId': target_hosp})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/patients', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_hospital_patients():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+        requested_hosp = str(request.args.get('hospitalId') or '').strip().lower()
+
+        target_hosp = admin_hosp if role == 'hospital_admin' else requested_hosp
+
+        patients_raw = _patient_collection_reference().get() or {}
+        doctors_raw = _doctor_collection_reference().get() or {}
+
+        patients = []
+        if isinstance(patients_raw, dict):
+            for k, pat in patients_raw.items():
+                if not isinstance(pat, dict):
+                    continue
+                pat_hosp = str(pat.get('hospitalId') or '').strip().lower()
+
+                if not pat_hosp:
+                    doc_id = str(pat.get('assignedDoctorId') or pat.get('doctorId') or '').strip().lower()
+                    for d in doctors_raw.values():
+                        if isinstance(d, dict) and str(d.get('email') or d.get('doctorId') or '').strip().lower() == doc_id:
+                            pat_hosp = str(d.get('hospitalId') or '').strip().lower()
+                            break
+
+                if target_hosp and pat_hosp != target_hosp:
+                    continue
+
+                item = dict(pat)
+                item.pop('passwordHash', None)
+                item.pop('password', None)
+                p_id = str(item.get('id') or item.get('patientId') or k)
+                item['id'] = p_id
+                item['patientId'] = p_id
+                item['hospitalId'] = pat.get('hospitalId') or pat_hosp or admin_hosp
+                patients.append(item)
+
+        search_term = str(request.args.get('search') or '').strip().lower()
+        if search_term:
+            patients = [p for p in patients if (
+                search_term in str(p.get('patientId') or '').lower() or
+                search_term in str(p.get('name') or '').lower() or
+                search_term in str(p.get('email') or '').lower() or
+                search_term in str(p.get('phone') or '').lower()
+            )]
+
+        patients.sort(key=lambda x: str(x.get('createdAt') or x.get('updatedAt') or ''), reverse=True)
+
+        page = max(int(request.args.get('page') or 1), 1)
+        limit = min(max(int(request.args.get('limit') or 20), 1), 100)
+        total = len(patients)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+
+        return api_success('Hospital patients fetched successfully.', {
+            'patients': patients[start_idx:end_idx],
+            'total': total,
+            'page': page,
+            'limit': limit,
+            'totalPages': (total + limit - 1) // limit if limit > 0 else 1
+        })
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/patients', methods=['POST'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def register_hospital_patient():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip()
+
+        data = request.get_json(silent=True) or {}
+        name = str(data.get('name') or '').strip()
+        email = str(data.get('email') or '').strip().lower()
+        phone = str(data.get('phone') or '').strip()
+
+        if not name:
+            return api_error('Patient name is required.', 400)
+        if not email or '@' not in email:
+            return api_error('Valid email is required.', 400)
+        if not phone or len(_normalize_phone(phone)) < 8:
+            return api_error('Valid phone number is required.', 400)
+
+        norm_phone = _normalize_phone(phone)
+        norm_email = email.lower()
+
+        # Strict duplicate prevention across patient registry
+        existing_patients = _patient_collection_reference().get() or {}
+        if isinstance(existing_patients, dict):
+            for k, p in existing_patients.items():
+                if not isinstance(p, dict):
+                    continue
+                p_email = str(p.get('email') or '').strip().lower()
+                p_phone = _normalize_phone(p.get('phone') or '')
+                if p_email == norm_email:
+                    return api_error(f'Duplicate registration prevented: A patient with email {email} is already registered (ID: {p.get("patientId") or k}).', 409)
+                if p_phone and p_phone == norm_phone:
+                    return api_error(f'Duplicate registration prevented: A patient with phone {phone} is already registered (ID: {p.get("patientId") or k}).', 409)
+
+        target_hosp = admin_hosp if role == 'hospital_admin' else str(data.get('hospitalId') or admin_hosp or 'HOSP-CITY-01').strip()
+
+        assigned_doc_id = str(data.get('assignedDoctorId') or data.get('doctorId') or '').strip()
+        assigned_doc_name = ''
+        assigned_doc_email = ''
+        assigned_doc_phone = ''
+
+        if assigned_doc_id:
+            doctors_raw = _doctor_collection_reference().get() or {}
+            matched_doc = None
+            if isinstance(doctors_raw, dict):
+                for k, d in doctors_raw.items():
+                    if isinstance(d, dict) and (d.get('id') == assigned_doc_id or d.get('doctorId') == assigned_doc_id or d.get('email') == assigned_doc_id or k == assigned_doc_id.replace('.', ',')):
+                        matched_doc = d
+                        break
+
+            if not matched_doc:
+                return api_error('Assigned doctor not found.', 404)
+
+            doc_hosp = str(matched_doc.get('hospitalId') or '').strip().lower()
+            if role == 'hospital_admin' and doc_hosp and doc_hosp != target_hosp.lower():
+                return api_error('Assigned doctor must belong to the same hospital.', 400)
+
+            assigned_doc_id = str(matched_doc.get('id') or matched_doc.get('doctorId') or matched_doc.get('email'))
+            assigned_doc_name = matched_doc.get('name') or assigned_doc_id
+            assigned_doc_email = str(matched_doc.get('email') or '')
+            assigned_doc_phone = str(matched_doc.get('phone') or '')
+
+        year = datetime.now().year
+        pat_id = f"PAT-{year}-{secrets.token_hex(2).upper()}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        raw_pass = str(data.get('password') or 'HealthCare@2026').strip()
+        pass_hash = generate_password_hash(raw_pass)
+
+        record = {
+            'id': pat_id,
+            'patientId': pat_id,
+            'name': name,
+            'email': norm_email,
+            'phone': phone,
+            'age': int(data.get('age') or 30),
+            'gender': str(data.get('gender') or 'other').strip().lower(),
+            'bloodGroup': str(data.get('bloodGroup') or 'O+').strip(),
+            'address': str(data.get('address') or '').strip(),
+            'hospitalId': target_hosp,
+            'assignedDoctorId': assigned_doc_id,
+            'assignedDoctorName': assigned_doc_name,
+            'assignedDoctorEmail': assigned_doc_email,
+            'assignedDoctorPhone': assigned_doc_phone,
+            'doctorId': assigned_doc_id,
+            'doctorName': assigned_doc_name,
+            'doctorEmail': assigned_doc_email,
+            'password': raw_pass,
+            'passwordHash': pass_hash,
+            'isActive': True,
+            'status': 'active',
+            'createdAt': now_iso,
+            'updatedAt': now_iso,
+        }
+
+        _patient_collection_reference().child(pat_id).set(record)
+
+        _log_patient_history(pat_id, 'REGISTRATION', {
+            'hospitalId': target_hosp,
+            'assignedDoctor': assigned_doc_name or 'Unassigned',
+            'assignedDoctorId': assigned_doc_id or '',
+            'registeredBy': requester.get('email') or requester.get('adminId') or 'admin',
+        }, requester)
+
+        _log_security_event(requester, 'PATIENT_REGISTERED', 'patient', pat_id, target_hosp, f"Registered patient {name} ({pat_id})")
+
+        client_record = dict(record)
+        client_record.pop('passwordHash', None)
+        client_record.pop('password', None)
+
+        return api_success('Patient registered successfully.', {'patient': client_record}, 201)
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/patients/<patient_id>/assign', methods=['PUT'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def reassign_patient_doctor(patient_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        patient_ref = _patient_collection_reference().child(patient_id)
+        patient = patient_ref.get()
+        if not isinstance(patient, dict):
+            return api_error('Patient not found.', 404)
+
+        pat_hosp = str(patient.get('hospitalId') or '').strip().lower()
+        if role == 'hospital_admin' and pat_hosp and pat_hosp != admin_hosp:
+            return api_error('Forbidden. Hospital administrators can only reassign patients in their hospital.', 403)
+
+        data = request.get_json(silent=True) or {}
+        new_doc_id = str(data.get('doctorId') or data.get('assignedDoctorId') or '').strip()
+        if not new_doc_id:
+            return api_error('New doctor ID is required.', 400)
+
+        doctors_raw = _doctor_collection_reference().get() or {}
+        matched_doc = None
+        if isinstance(doctors_raw, dict):
+            for k, d in doctors_raw.items():
+                if isinstance(d, dict) and (d.get('id') == new_doc_id or d.get('doctorId') == new_doc_id or d.get('email') == new_doc_id or k == new_doc_id.replace('.', ',')):
+                    matched_doc = d
+                    break
+
+        if not matched_doc:
+            return api_error('Doctor not found.', 404)
+
+        doc_hosp = str(matched_doc.get('hospitalId') or '').strip().lower()
+        if role == 'hospital_admin' and doc_hosp and doc_hosp != admin_hosp:
+            return api_error('Assigned doctor must belong to the same hospital.', 400)
+
+        old_doc_name = str(patient.get('assignedDoctorName') or patient.get('doctorName') or 'Unassigned')
+        old_doc_id = str(patient.get('assignedDoctorId') or patient.get('doctorId') or '')
+        new_doc_name = matched_doc.get('name') or new_doc_id
+        new_doc_email = str(matched_doc.get('email') or '')
+        new_doc_phone = str(matched_doc.get('phone') or '')
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        updates = {
+            'assignedDoctorId': new_doc_id,
+            'assignedDoctorName': new_doc_name,
+            'assignedDoctorEmail': new_doc_email,
+            'assignedDoctorPhone': new_doc_phone,
+            'doctorId': new_doc_id,
+            'doctorName': new_doc_name,
+            'doctorEmail': new_doc_email,
+            'assignedDoctorUpdatedAt': now_iso,
+            'updatedAt': now_iso,
+        }
+        if not patient.get('hospitalId') and (doc_hosp or admin_hosp):
+            updates['hospitalId'] = doc_hosp or admin_hosp
+
+        patient_ref.update(updates)
+
+        _log_patient_history(patient_id, 'DOCTOR_REASSIGNMENT', {
+            'previousDoctor': old_doc_name,
+            'previousDoctorId': old_doc_id,
+            'newDoctor': new_doc_name,
+            'newDoctorId': new_doc_id,
+            'reason': str(data.get('reason') or 'Clinical reassignment by administrator'),
+        }, requester)
+
+        _log_security_event(requester, 'PATIENT_ASSIGNMENT_CHANGED', 'patient', patient_id, pat_hosp or admin_hosp, f"Reassigned from {old_doc_name} to {new_doc_name}")
+
+        updated_patient = {**patient, **updates}
+        updated_patient.pop('passwordHash', None)
+        updated_patient.pop('password', None)
+
+        return api_success('Patient doctor assignment updated successfully.', {'patient': updated_patient})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/patient/<patient_id>/history', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin', 'doctor', 'patient'})
+def get_patient_history_route(patient_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+
+        patient = _patient_collection_reference().child(patient_id).get()
+        if not isinstance(patient, dict):
+            return api_error('Patient not found.', 404)
+
+        if role == 'patient':
+            if str(requester.get('patientId') or requester.get('id') or '').strip().lower() != str(patient_id).strip().lower():
+                return api_error('Access denied.', 403)
+        elif role == 'doctor':
+            doc_id = str(requester.get('doctorId') or requester.get('email') or '').strip().lower()
+            if not _doctor_owns_record(patient, doc_id):
+                return api_error('Access denied for this patient record.', 403)
+        elif role == 'hospital_admin':
+            admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+            pat_hosp = str(patient.get('hospitalId') or '').strip().lower()
+            if pat_hosp and pat_hosp != admin_hosp:
+                return api_error('Access denied for this hospital patient record.', 403)
+
+        raw_history = _patient_history_reference(patient_id).get() or {}
+        history_items = []
+        if isinstance(raw_history, dict):
+            for k, item in raw_history.items():
+                if isinstance(item, dict):
+                    history_items.append(item)
+
+        history_items.sort(key=lambda x: str(x.get('timestamp') or ''), reverse=True)
+        return api_success('Patient history fetched successfully.', {'history': history_items, 'patientId': patient_id})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/patients/export', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def export_hospital_patients():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        patients_raw = _patient_collection_reference().get() or {}
+        doctors_raw = _doctor_collection_reference().get() or {}
+
+        patients = []
+        if isinstance(patients_raw, dict):
+            for k, pat in patients_raw.items():
+                if not isinstance(pat, dict):
+                    continue
+                pat_hosp = str(pat.get('hospitalId') or '').strip().lower()
+                if not pat_hosp:
+                    doc_id = str(pat.get('assignedDoctorId') or pat.get('doctorId') or '').strip().lower()
+                    for d in doctors_raw.values():
+                        if isinstance(d, dict) and str(d.get('email') or d.get('doctorId') or '').strip().lower() == doc_id:
+                            pat_hosp = str(d.get('hospitalId') or '').strip().lower()
+                            break
+
+                if role == 'hospital_admin' and pat_hosp != admin_hosp:
+                    continue
+
+                patients.append(pat)
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow(['Patient ID', 'Name', 'Email', 'Phone', 'Age', 'Gender', 'Blood Group', 'Hospital ID', 'Assigned Doctor', 'Status', 'Registered Date'])
+
+        for p in patients:
+            writer.writerow([
+                p.get('patientId') or p.get('id', ''),
+                p.get('name', ''),
+                p.get('email', ''),
+                p.get('phone', ''),
+                p.get('age', ''),
+                p.get('gender', ''),
+                p.get('bloodGroup', ''),
+                p.get('hospitalId', ''),
+                p.get('assignedDoctorName') or p.get('doctorName', ''),
+                'Active' if p.get('isActive') is not False and p.get('status') != 'deactivated' else 'Deactivated',
+                p.get('createdAt', ''),
+            ])
+
+        _log_security_event(requester, 'PATIENTS_EXPORTED', 'patient', 'export', admin_hosp, f"Exported {len(patients)} patient records")
+
+        return Response(
+            output.getvalue(),
+            mimetype='text/csv',
+            headers={'Content-Disposition': 'attachment; filename=hospital_patients.csv'}
+        )
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/appointments', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin', 'doctor'})
+def get_hospital_appointments():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        raw_apts = _appointments_collection_reference().get() or {}
+        appointments = []
+        if isinstance(raw_apts, dict):
+            for k, a in raw_apts.items():
+                if not isinstance(a, dict):
+                    continue
+                a_hosp = str(a.get('hospitalId') or '').strip().lower()
+                if role == 'hospital_admin' and a_hosp != admin_hosp:
+                    continue
+                if role == 'doctor':
+                    doc_id = str(requester.get('doctorId') or requester.get('email') or '').strip().lower()
+                    a_doc = str(a.get('doctorId') or '').strip().lower()
+                    if a_doc != doc_id:
+                        continue
+
+                item = dict(a)
+                item['id'] = a.get('id') or a.get('appointmentId') or k
+                appointments.append(item)
+
+        status_filter = str(request.args.get('status') or '').strip().lower()
+        if status_filter:
+            appointments = [a for a in appointments if str(a.get('status') or '').lower() == status_filter]
+
+        appointments.sort(key=lambda x: str(x.get('appointmentDate') or '') + ' ' + str(x.get('appointmentTime') or ''))
+        return api_success('Appointments fetched successfully.', {'appointments': appointments})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/appointments', methods=['POST'])
+@require_auth(roles={'super_admin', 'hospital_admin', 'doctor'})
+def create_hospital_appointment():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip()
+
+        data = request.get_json(silent=True) or {}
+        patient_id = str(data.get('patientId') or '').strip()
+        doctor_id = str(data.get('doctorId') or '').strip()
+        apt_date = str(data.get('appointmentDate') or '').strip()
+        apt_time = str(data.get('appointmentTime') or '').strip()
+        apt_type = str(data.get('type') or 'Consultation').strip()
+
+        if not patient_id or not doctor_id or not apt_date:
+            return api_error('Patient ID, Doctor ID, and Appointment Date are required.', 400)
+
+        patient = _patient_collection_reference().child(patient_id).get()
+        if not isinstance(patient, dict):
+            return api_error('Patient not found.', 404)
+
+        doctors_raw = _doctor_collection_reference().get() or {}
+        doctor = None
+        if isinstance(doctors_raw, dict):
+            for k, d in doctors_raw.items():
+                if isinstance(d, dict) and (d.get('id') == doctor_id or d.get('doctorId') == doctor_id or d.get('email') == doctor_id or k == doctor_id.replace('.', ',')):
+                    doctor = d
+                    break
+
+        if not doctor:
+            return api_error('Doctor not found.', 404)
+
+        doc_hosp = str(doctor.get('hospitalId') or admin_hosp or 'HOSP-CITY-01').strip()
+        if role == 'hospital_admin' and admin_hosp.lower() != doc_hosp.lower():
+            return api_error('Appointments can only be scheduled for doctors within your hospital.', 403)
+
+        apt_id = f"APT-{datetime.now().year}-{secrets.token_hex(2).upper()}"
+        now_iso = datetime.now(timezone.utc).isoformat()
+        appointment_record = {
+            'id': apt_id,
+            'appointmentId': apt_id,
+            'patientId': patient_id,
+            'patientName': patient.get('name') or patient_id,
+            'patientPhone': patient.get('phone') or '',
+            'doctorId': doctor_id,
+            'doctorName': doctor.get('name') or doctor_id,
+            'doctorSpecialty': doctor.get('specialty') or doctor.get('department') or 'General',
+            'hospitalId': doc_hosp,
+            'appointmentDate': apt_date,
+            'appointmentTime': apt_time,
+            'type': apt_type,
+            'notes': str(data.get('notes') or '').strip(),
+            'status': 'scheduled',
+            'createdAt': now_iso,
+            'updatedAt': now_iso,
+        }
+
+        _appointments_collection_reference().child(apt_id).set(appointment_record)
+
+        _log_patient_history(patient_id, 'APPOINTMENT_SCHEDULED', {
+            'appointmentId': apt_id,
+            'doctorName': doctor.get('name') or doctor_id,
+            'date': apt_date,
+            'time': apt_time,
+            'type': apt_type,
+        }, requester)
+
+        _log_security_event(requester, 'APPOINTMENT_CREATED', 'appointment', apt_id, doc_hosp, f"Scheduled appointment with Dr. {doctor.get('name')}")
+        return api_success('Appointment scheduled successfully.', {'appointment': appointment_record}, 201)
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/appointments/<appointment_id>/status', methods=['PUT'])
+@require_auth(roles={'super_admin', 'hospital_admin', 'doctor'})
+def update_appointment_status(appointment_id):
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        apt_ref = _appointments_collection_reference().child(appointment_id)
+        apt = apt_ref.get()
+        if not isinstance(apt, dict):
+            return api_error('Appointment not found.', 404)
+
+        apt_hosp = str(apt.get('hospitalId') or '').strip().lower()
+        if role == 'hospital_admin' and apt_hosp != admin_hosp:
+            return api_error('Forbidden. Hospital administrators can only update appointments for their hospital.', 403)
+
+        if role == 'doctor':
+            doc_id = str(requester.get('doctorId') or requester.get('email') or '').strip().lower()
+            if str(apt.get('doctorId') or '').strip().lower() != doc_id:
+                return api_error('Forbidden. Doctors can only update their own appointments.', 403)
+
+        data = request.get_json(silent=True) or {}
+        new_status = str(data.get('status') or '').strip().lower()
+        if new_status not in ('scheduled', 'in-progress', 'completed', 'cancelled'):
+            return api_error('Invalid status. Must be scheduled, in-progress, completed, or cancelled.', 400)
+
+        now_iso = datetime.now(timezone.utc).isoformat()
+        updates = {
+            'status': new_status,
+            'notes': str(data.get('notes') or apt.get('notes') or '').strip(),
+            'updatedAt': now_iso,
+        }
+        apt_ref.update(updates)
+
+        _log_patient_history(apt.get('patientId'), 'APPOINTMENT_STATUS_CHANGED', {
+            'appointmentId': appointment_id,
+            'previousStatus': apt.get('status'),
+            'newStatus': new_status,
+        }, requester)
+
+        updated_record = {**apt, **updates}
+        return api_success(f'Appointment marked as {new_status}.', {'appointment': updated_record})
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/hospital/telemetry-overview', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_hospital_telemetry_overview():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        emergencies_raw = db.reference('emergencyAlerts').get() or {}
+        appointments_raw = _appointments_collection_reference().get() or {}
+
+        alerts = []
+        if isinstance(emergencies_raw, dict):
+            for k, emg in emergencies_raw.items():
+                if not isinstance(emg, dict):
+                    continue
+                e_hosp = str(emg.get('hospitalId') or '').strip().lower()
+                if role == 'hospital_admin' and e_hosp and e_hosp != admin_hosp:
+                    continue
+                alerts.append({
+                    'id': emg.get('id') or emg.get('alertId') or k,
+                    'patientId': emg.get('patientId') or '',
+                    'patientName': emg.get('patientName') or '',
+                    'type': emg.get('type') or 'SOS',
+                    'status': emg.get('status') or 'TRIGGERED',
+                    'severity': emg.get('severity') or 'CRITICAL',
+                    'timestamp': emg.get('timestamp') or '',
+                    'location': emg.get('location') or {},
+                })
+
+        active_alerts = [a for a in alerts if str(a.get('status') or '').upper() not in ('RESOLVED', 'DISMISSED')]
+
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_apts = []
+        if isinstance(appointments_raw, dict):
+            for k, a in appointments_raw.items():
+                if not isinstance(a, dict):
+                    continue
+                a_hosp = str(a.get('hospitalId') or '').strip().lower()
+                if role == 'hospital_admin' and a_hosp != admin_hosp:
+                    continue
+                if str(a.get('appointmentDate') or '') == today_str:
+                    today_apts.append(a)
+
+        return api_success('Telemetry overview fetched successfully.', {
+            'activeEmergencyAlerts': active_alerts,
+            'totalEmergencyAlerts': len(alerts),
+            'todayAppointments': len(today_apts),
+            'hospitalId': admin_hosp if role == 'hospital_admin' else 'ALL',
         })
     except Exception as error:
         return api_error(str(error), 500)
@@ -7297,8 +8519,9 @@ def serve_frontend_assets_or_spa(path=''):
 
 try:
     _ensure_default_super_admin()
+    _ensure_default_hospital()
 except Exception as _admin_init_err:
-    print(f"[Auth] Notice: Super admin bootstrap deferred: {_admin_init_err}")
+    print(f"[Auth] Notice: Bootstrap deferred: {_admin_init_err}")
 
 
 if __name__ == '__main__':

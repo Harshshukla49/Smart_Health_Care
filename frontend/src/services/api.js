@@ -487,6 +487,127 @@ export const getAdminStats = async () => {
   return unwrapEnvelope(response);
 };
 
+export const createHospital = async (payload) => {
+  const response = await api.post('/api/admin/hospitals', payload);
+  return unwrapEnvelope(response);
+};
+
+export const fetchHospitals = async () => {
+  const response = await api.get('/api/admin/hospitals');
+  return unwrapEnvelope(response);
+};
+
+export const fetchHospitalDetails = async (hospitalId) => {
+  const response = await api.get(`/api/admin/hospitals/${encodeURIComponent(hospitalId)}`);
+  return unwrapEnvelope(response);
+};
+
+export const updateHospital = async (hospitalId, payload) => {
+  const response = await api.put(`/api/admin/hospitals/${encodeURIComponent(hospitalId)}`, payload);
+  return unwrapEnvelope(response);
+};
+
+export const toggleHospitalStatus = async (hospitalId, isActive) => {
+  const response = await api.post(`/api/admin/hospitals/${encodeURIComponent(hospitalId)}/toggle-status`, { isActive });
+  return unwrapEnvelope(response);
+};
+
+export const fetchAdminMetrics = async () => {
+  const response = await api.get('/api/admin/metrics');
+  return unwrapEnvelope(response);
+};
+
+export const fetchAuditLogs = async (params = {}) => {
+  const response = await api.get('/api/admin/audit-logs', { params });
+  return unwrapEnvelope(response);
+};
+
+export const downloadAuditLogsCsv = async () => {
+  const response = await api.get('/api/admin/audit-logs/export', { responseType: 'blob' });
+  const blob = new Blob([response.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `security_audit_logs_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+};
+
+export const fetchHospitalDoctors = async (params = {}) => {
+  const response = await api.get('/api/hospital/doctors', { params });
+  return unwrapEnvelope(response);
+};
+
+export const updateHospitalDoctor = async (doctorId, payload) => {
+  const response = await api.put(`/api/hospital/doctors/${encodeURIComponent(doctorId)}`, payload);
+  return unwrapEnvelope(response);
+};
+
+export const fetchHospitalDepartments = async (hospitalId) => {
+  const response = await api.get('/api/hospital/departments', { params: hospitalId ? { hospitalId } : {} });
+  return unwrapEnvelope(response);
+};
+
+export const updateHospitalDepartments = async (payload) => {
+  const response = await api.post('/api/hospital/departments', payload);
+  return unwrapEnvelope(response);
+};
+
+export const fetchHospitalPatients = async (params = {}) => {
+  const response = await api.get('/api/hospital/patients', { params });
+  return unwrapEnvelope(response);
+};
+
+export const registerHospitalPatient = async (payload) => {
+  const response = await api.post('/api/hospital/patients', payload);
+  return unwrapEnvelope(response);
+};
+
+export const reassignPatientDoctor = async (patientId, payload) => {
+  const response = await api.put(`/api/hospital/patients/${encodeURIComponent(patientId)}/assign`, payload);
+  return unwrapEnvelope(response);
+};
+
+export const fetchPatientHistory = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(patientId)}/history`);
+  return unwrapEnvelope(response);
+};
+
+export const downloadPatientsCsv = async () => {
+  const response = await api.get('/api/hospital/patients/export', { responseType: 'blob' });
+  const blob = new Blob([response.data], { type: 'text/csv' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `hospital_patients_${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(url);
+};
+
+export const fetchHospitalAppointments = async (params = {}) => {
+  const response = await api.get('/api/hospital/appointments', { params });
+  return unwrapEnvelope(response);
+};
+
+export const createHospitalAppointment = async (payload) => {
+  const response = await api.post('/api/hospital/appointments', payload);
+  return unwrapEnvelope(response);
+};
+
+export const updateAppointmentStatus = async (appointmentId, payload) => {
+  const response = await api.put(`/api/hospital/appointments/${encodeURIComponent(appointmentId)}/status`, payload);
+  return unwrapEnvelope(response);
+};
+
+export const fetchHospitalTelemetryOverview = async () => {
+  const response = await api.get('/api/hospital/telemetry-overview');
+  return unwrapEnvelope(response);
+};
+
 export const verifyFirebasePhoneToken = async ({ idToken, role }) => {
   const response = await api.post('/auth/firebase/verify-phone-token', {
     idToken: toText(idToken),
