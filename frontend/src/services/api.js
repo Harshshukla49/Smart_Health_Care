@@ -1108,5 +1108,85 @@ export const generatePatientMedicalReportApi = async (patientId, payload) => {
   return unwrapEnvelope(response);
 };
 
+/**
+ * =========================================================================
+ * PATIENT PERSONAL HEALTHCARE PORTAL API METHODS
+ * =========================================================================
+ */
+
+/**
+ * Fetch patient portal summary (overview, assigned doctor, hospital, upcoming appointments,
+ * active prescriptions, source-tagged measurements, notifications)
+ */
+export const fetchPatientPortalSummary = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/portal-summary`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Update patient profile details (emergency contact, phone, address, etc.)
+ */
+export const updatePatientPortalProfile = async (patientId, payload) => {
+  const response = await api.put(`/api/patient/${encodeURIComponent(toText(patientId))}/profile`, payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch finalized read-only medical history (consultations, diagnoses, treatments, verified lab reports)
+ */
+export const fetchPatientMedicalHistory = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/medical-history`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch health monitoring vitals & historical logs with explicit data source provenance
+ */
+export const fetchPatientHealthMonitoring = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/health-monitoring`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Log manual patient vitals with physiological validation
+ */
+export const logPatientManualVitals = async (patientId, payload) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(toText(patientId))}/manual-vitals`, payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Query bilingual AI Health Assistant (Hindi / Hinglish / English) with emergency keyword detection
+ */
+export const askAiHealthAssistant = async (payload) => {
+  const response = await api.post('/api/patient/ai-health-assistant', payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch patient notifications
+ */
+export const fetchPatientNotifications = async (patientId) => {
+  const response = await api.get(`/api/patient/${encodeURIComponent(toText(patientId))}/notifications`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Mark a patient notification as read
+ */
+export const markPatientNotificationRead = async (patientId, notifId) => {
+  const response = await api.post(`/api/patient/${encodeURIComponent(toText(patientId))}/notifications/${encodeURIComponent(toText(notifId))}/read`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Change authenticated account password
+ */
+export const changeAccountPassword = async (payload) => {
+  const response = await api.post('/api/auth/change-password', payload);
+  return unwrapEnvelope(response);
+};
+
+
 
 

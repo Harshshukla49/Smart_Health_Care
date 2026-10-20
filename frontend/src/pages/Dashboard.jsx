@@ -73,6 +73,7 @@ import { EmergencyMap } from '../components/emergency/EmergencyMap';
 import { AiHealthAssessment } from '../components/AiHealthAssessment';
 import { MedicationManagement } from '../components/MedicationManagement';
 import { AdminControlCenter } from '../components/AdminControlCenter';
+import { PatientPortal } from '../components/patient/PatientPortal';
 
 export function Dashboard() {
   return (
@@ -573,6 +574,21 @@ function DashboardBody({ liveVitals }) {
         onSectionSelect={() => {}}
       >
         <AdminControlCenter session={session} />
+      </DashboardLayout>
+    );
+  }
+
+  if (role === 'patient') {
+    return (
+      <DashboardLayout
+        role={role}
+        title="Personal Healthcare Portal"
+        subtitle="Ambulatory Telemetry, Clinical Consultations & Health Management"
+        backLabel={t('common.backToHome')}
+        activeSection="portal"
+        onSectionSelect={() => {}}
+      >
+        <PatientPortal session={session} liveVitals={liveVitals} emergency={emergency} />
       </DashboardLayout>
     );
   }
