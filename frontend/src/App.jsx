@@ -17,6 +17,7 @@ import { LoginSelection } from './pages/LoginSelection';
 import { PatientLogin } from './pages/PatientLogin';
 import PatientWelcome from './pages/PatientWelcome';
 import { DoctorLogin } from './pages/DoctorLogin';
+import { AdminLogin } from './pages/AdminLogin';
 import { SignupSelection } from './pages/SignupSelection';
 import { PatientSignup } from './pages/PatientSignup';
 import { DoctorSignup } from './pages/DoctorSignup';
@@ -86,12 +87,12 @@ function ScopedPatientDetailsRoute() {
     return <Navigate to="/login" replace />;
   }
 
-  const isDoctor = session.role === 'doctor';
+  const isPrivileged = session.role === 'doctor' || session.role === 'hospital_admin' || session.role === 'super_admin';
   const selfPatientId = String(session.patientId || '').trim();
   const requestedId = String(patientId || '').trim();
 
   // Patients cannot view another patient's data
-  if (!isDoctor && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase()) {
+  if (!isPrivileged && selfPatientId && requestedId && selfPatientId.toLowerCase() !== requestedId.toLowerCase()) {
     toast.error(
       'Access Denied: As a patient, you are strictly restricted to your own personal telemetry records.',
       { duration: 4000 }
@@ -150,6 +151,8 @@ export default function App() {
             <Route path="/login" element={<AuthRoute><LoginSelection /></AuthRoute>} />
             <Route path="/login/patient" element={<AuthRoute><PatientLogin /></AuthRoute>} />
             <Route path="/login/doctor" element={<AuthRoute><DoctorLogin /></AuthRoute>} />
+            <Route path="/login/admin" element={<AuthRoute><AdminLogin /></AuthRoute>} />
+            <Route path="/admin/login" element={<Navigate to="/login/admin" replace />} />
             <Route path="/signup" element={<AuthRoute><SignupSelection /></AuthRoute>} />
             <Route path="/signup/patient" element={<AuthRoute><PatientSignup /></AuthRoute>} />
             <Route path="/signup/doctor" element={<AuthRoute><DoctorSignup /></AuthRoute>} />

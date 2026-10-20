@@ -446,6 +446,47 @@ export const loginDoctor = async ({ email, password }) => {
   };
 };
 
+export const loginAdmin = async ({ email, password }) => {
+  const response = await api.post('/api/auth/admin/login', {
+    email: toText(email).toLowerCase(),
+    password: toText(password),
+  });
+  const data = unwrapEnvelope(response);
+  return {
+    admin: data?.admin || null,
+    auth: data?.auth || null,
+  };
+};
+
+export const provisionDoctor = async (payload) => {
+  const response = await api.post('/api/admin/provision/doctor', payload);
+  return unwrapEnvelope(response);
+};
+
+export const provisionHospitalAdmin = async (payload) => {
+  const response = await api.post('/api/admin/provision/hospital-admin', payload);
+  return unwrapEnvelope(response);
+};
+
+export const toggleAccountStatus = async ({ targetType, targetId, active }) => {
+  const response = await api.post('/api/admin/accounts/toggle-status', {
+    targetType,
+    targetId,
+    active,
+  });
+  return unwrapEnvelope(response);
+};
+
+export const getAdminAccounts = async () => {
+  const response = await api.get('/api/admin/accounts');
+  return unwrapEnvelope(response);
+};
+
+export const getAdminStats = async () => {
+  const response = await api.get('/api/admin/stats');
+  return unwrapEnvelope(response);
+};
+
 export const verifyFirebasePhoneToken = async ({ idToken, role }) => {
   const response = await api.post('/auth/firebase/verify-phone-token', {
     idToken: toText(idToken),

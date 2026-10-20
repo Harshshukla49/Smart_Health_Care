@@ -29,7 +29,20 @@ import { PwaInstallButton } from '../pwa/PwaInstallButton';
 
 function getNavigationSections(role, t) {
   const isDoctor = role === 'doctor';
+  const isAdmin = role === 'super_admin' || role === 'hospital_admin';
   const tr = (key, fallback) => (t ? t(key) : fallback);
+
+  if (isAdmin) {
+    return [
+      {
+        title: 'ADMINISTRATION & RBAC',
+        items: [
+          { id: 'admin-console', label: 'Admin Control Center', to: '/dashboard', icon: LayoutDashboard },
+          { id: 'settings', label: 'Security & Profile', to: '/settings', icon: Settings },
+        ],
+      },
+    ];
+  }
 
   if (!isDoctor) {
     // PATIENT SCOPED NAVIGATION:

@@ -12,33 +12,7 @@ def require_auth(roles=None, patient_id_arg=None):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            payload, auth_error = _require_auth_payload()
-            if auth_error:
-                return auth_error
-
-            role = str(payload.get('role') or '').strip().lower()
-            if allowed_roles and role not in allowed_roles:
-                return api_error('Forbidden. You are not authorized to perform this action.', 403)
-
-            if patient_id_arg:
-                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
-                if role == 'patient':
-                    requester_patient_id = str(payload.get('patientId') or '').strip()
-                    if not requester_patient_id or requester_patient_id != target_patient_id:
-                        return api_error('Access denied for this patient record.', 403)
-
-                if role == 'doctor':
-                    doctor_id = str(payload.get('email') or '').strip().lower()
-                    if not doctor_id:
-                        return api_error('Forbidden. Doctor context is missing from token.', 403)
-
-                    record = _patient_collection_reference().child(target_patient_id).get()
-                    if not isinstance(record, dict):
-                        return api_error('Patient not found.', 404)
-                    if not _doctor_owns_record(record, doctor_id):
-                        return api_error('Access denied for this patient record.', 403)
-
-            return fn(*args, **kwargs)
+            return _execute_auth_guard(fn, allowed_roles, patient_id_arg, args, kwargs)
 
         return wrapper
 
@@ -163,6 +137,7 @@ import smtplib
 import secrets
 import string
 import time
+import threading
 import hashlib
 import hmac
 from datetime import datetime, timedelta, timezone
@@ -288,33 +263,7 @@ def require_auth(roles=None, patient_id_arg=None):
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            payload, auth_error = _require_auth_payload()
-            if auth_error:
-                return auth_error
-
-            role = str(payload.get('role') or '').strip().lower()
-            if allowed_roles and role not in allowed_roles:
-                return api_error('Forbidden. You are not authorized to perform this action.', 403)
-
-            if patient_id_arg:
-                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
-                if role == 'patient':
-                    requester_patient_id = str(payload.get('patientId') or '').strip()
-                    if not requester_patient_id or requester_patient_id != target_patient_id:
-                        return api_error('Access denied for this patient record.', 403)
-
-                if role == 'doctor':
-                    doctor_id = str(payload.get('email') or '').strip().lower()
-                    if not doctor_id:
-                        return api_error('Forbidden. Doctor context is missing from token.', 403)
-
-                    record = _patient_collection_reference().child(target_patient_id).get()
-                    if not isinstance(record, dict):
-                        return api_error('Patient not found.', 404)
-                    if not _doctor_owns_record(record, doctor_id):
-                        return api_error('Access denied for this patient record.', 403)
-
-            return fn(*args, **kwargs)
+            return _execute_auth_guard(fn, allowed_roles, patient_id_arg, args, kwargs)
 
         return wrapper
 
@@ -347,9 +296,11 @@ def api_success(message='OK', data=None, status_code=200):
 
 
 def api_error(message='Request failed.', status_code=400, data=None):
+    err_str = str(message or 'Request failed.')
     return jsonify({
         'status': 'error',
-        'message': str(message or 'Request failed.'),
+        'message': err_str,
+        'error': err_str,
         'data': data if data is not None else {},
         'meta': _request_meta(),
     }), status_code
@@ -988,7 +939,10 @@ def mark_patient_medicine_taken(patient_id, medicine_id):
         return api_error(error, 404)
 
     payload = request.get_json(silent=True) or {}
-    taken = bool(payload.get('taken', True))
+    raw_taken = payload.get('taken')
+    if raw_taken is not None and not isinstance(raw_taken, bool):
+        return api_error("Field 'taken' must be a boolean.", 400)
+    taken = True if raw_taken is None else bool(raw_taken)
     taken_at = _utc_now_iso()
 
     updated = False
@@ -1387,6 +1341,47 @@ def _doctor_collection_reference():
 
 def _password_reset_reference():
     return db.reference('password_resets')
+
+
+def _admin_collection_reference():
+    return db.reference('admins')
+
+
+_RATE_LIMIT_STORE = {}
+_RATE_LIMIT_LOCK = threading.Lock()
+
+
+def _check_rate_limit(key: str, max_requests: int = 10, window_seconds: int = 300):
+    """Sliding window in-memory rate limiter per key (e.g. client IP)."""
+    now = time.time()
+    with _RATE_LIMIT_LOCK:
+        history = _RATE_LIMIT_STORE.get(key, [])
+        history = [ts for ts in history if now - ts < window_seconds]
+        if len(history) >= max_requests:
+            remaining = int(window_seconds - (now - history[0]))
+            _RATE_LIMIT_STORE[key] = history
+            return False, max(1, remaining)
+        history.append(now)
+        _RATE_LIMIT_STORE[key] = history
+        return True, 0
+
+
+def _get_client_ip():
+    forwarded = request.headers.get('X-Forwarded-For')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or '127.0.0.1'
+
+
+def _is_valid_email(email: str) -> bool:
+    return bool(re.match(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$', str(email or '').strip()))
+
+
+def _is_strong_password(password: str) -> tuple[bool, str]:
+    pwd = str(password or '').strip()
+    if len(pwd) < 8:
+        return False, "Password must be at least 8 characters long."
+    return True, ""
 
 
 def _normalize_role(value):
@@ -1828,10 +1823,87 @@ def _read_auth_payload():
         return {}
 
 
+def _is_account_active(payload):
+    if not isinstance(payload, dict):
+        return False
+    role = str(payload.get('role') or '').strip().lower()
+
+    if payload.get('isActive') is False or payload.get('status') == 'deactivated':
+        return False
+
+    try:
+        if role in ('super_admin', 'hospital_admin', 'admin'):
+            admin_email = str(payload.get('email') or '').strip().lower()
+            admin_id = str(payload.get('adminId') or payload.get('id') or '').strip()
+            # 1. Direct key by email
+            if admin_email:
+                rec = _admin_collection_reference().child(admin_email.replace('.', ',')).get()
+                if isinstance(rec, dict):
+                    return not (rec.get('isActive') is False or rec.get('status') == 'deactivated')
+            # 2. Direct key by ID
+            if admin_id:
+                rec = _admin_collection_reference().child(admin_id).get()
+                if isinstance(rec, dict):
+                    return not (rec.get('isActive') is False or rec.get('status') == 'deactivated')
+            # 3. Fallback scan
+            all_admins = _admin_collection_reference().get()
+            if isinstance(all_admins, dict):
+                for k, a in all_admins.items():
+                    if isinstance(a, dict):
+                        if (admin_id and (a.get('id') == admin_id or a.get('adminId') == admin_id)) or \
+                           (admin_email and str(a.get('email') or '').strip().lower() == admin_email):
+                            return not (a.get('isActive') is False or a.get('status') == 'deactivated')
+
+        elif role == 'doctor':
+            doc_email = str(payload.get('email') or payload.get('doctorId') or '').strip().lower()
+            doc_id = str(payload.get('id') or payload.get('doctorId') or '').strip()
+            # 1. Direct key by email
+            if doc_email:
+                rec = _doctor_collection_reference().child(doc_email.replace('.', ',')).get()
+                if isinstance(rec, dict):
+                    return not (rec.get('isActive') is False or rec.get('status') == 'deactivated')
+            # 2. Direct key by ID
+            if doc_id:
+                rec = _doctor_collection_reference().child(doc_id).get()
+                if isinstance(rec, dict):
+                    return not (rec.get('isActive') is False or rec.get('status') == 'deactivated')
+            # 3. Fallback scan
+            all_docs = _doctor_collection_reference().get()
+            if isinstance(all_docs, dict):
+                for k, d in all_docs.items():
+                    if isinstance(d, dict):
+                        if (doc_id and (d.get('id') == doc_id or d.get('doctorId') == doc_id)) or \
+                           (doc_email and str(d.get('email') or '').strip().lower() == doc_email):
+                            return not (d.get('isActive') is False or d.get('status') == 'deactivated')
+
+        elif role == 'patient':
+            pat_id = str(payload.get('patientId') or payload.get('id') or '').strip()
+            pat_email = str(payload.get('email') or '').strip().lower()
+            # 1. Direct key by ID
+            if pat_id:
+                rec = _patient_collection_reference().child(pat_id).get()
+                if isinstance(rec, dict):
+                    return not (rec.get('isActive') is False or rec.get('status') == 'deactivated')
+            # 2. Fallback scan
+            all_pats = _patient_collection_reference().get()
+            if isinstance(all_pats, dict):
+                for k, p in all_pats.items():
+                    if isinstance(p, dict):
+                        if (pat_id and (p.get('id') == pat_id or p.get('patientId') == pat_id)) or \
+                           (pat_email and str(p.get('email') or '').strip().lower() == pat_email):
+                            return not (p.get('isActive') is False or p.get('status') == 'deactivated')
+    except Exception:
+        pass
+
+    return True
+
+
 def _require_auth_payload():
     payload = _read_auth_payload()
     if not payload:
         return None, api_error('Unauthorized. Valid auth token is required.', 401)
+    if not _is_account_active(payload):
+        return None, api_error('Account has been deactivated. Please contact an administrator.', 403)
     return payload, None
 
 
@@ -1877,39 +1949,73 @@ def _request_doctor_phone(payload=None):
     return ''
 
 
+def _execute_auth_guard(fn, allowed_roles, patient_id_arg, args, kwargs):
+    payload, auth_error = _require_auth_payload()
+    if auth_error:
+        return auth_error
+
+    role = str(payload.get('role') or '').strip().lower()
+
+    if allowed_roles:
+        role_allowed = False
+        if role == 'super_admin':
+            role_allowed = True
+        elif role == 'hospital_admin':
+            role_allowed = (role in allowed_roles) or ('admin' in allowed_roles) or ('doctor' in allowed_roles)
+        elif role == 'doctor':
+            role_allowed = ('doctor' in allowed_roles)
+        elif role == 'patient':
+            role_allowed = ('patient' in allowed_roles)
+        elif 'admin' in allowed_roles and role in ('super_admin', 'hospital_admin'):
+            role_allowed = True
+
+        if not role_allowed:
+            return api_error('Forbidden. You are not authorized to perform this action.', 403)
+
+    if patient_id_arg:
+        target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
+        if not target_patient_id:
+            target_patient_id = str((request.view_args or {}).get(patient_id_arg) or '').strip()
+
+        if role == 'patient':
+            requester_patient_id = str(payload.get('patientId') or payload.get('id') or '').strip()
+            if not requester_patient_id or requester_patient_id.lower() != target_patient_id.lower():
+                return api_error('Access denied for this patient record.', 403)
+
+        elif role == 'doctor':
+            doctor_id = str(payload.get('doctorId') or payload.get('email') or payload.get('uid') or '').strip().lower()
+            if not doctor_id:
+                return api_error('Forbidden. Doctor context is missing from token.', 403)
+
+            record = _patient_collection_reference().child(target_patient_id).get()
+            if not isinstance(record, dict):
+                return api_error('Patient not found.', 404)
+            if not _doctor_owns_record(record, doctor_id):
+                return api_error('Access denied for this patient record.', 403)
+
+        elif role == 'hospital_admin':
+            admin_hosp = str(payload.get('hospitalId') or '').strip().lower()
+            record = _patient_collection_reference().child(target_patient_id).get()
+            if not isinstance(record, dict):
+                return api_error('Patient not found.', 404)
+            if admin_hosp:
+                patient_hosp = str(record.get('hospitalId') or '').strip().lower()
+                doctor_email = str(record.get('doctorId') or record.get('doctorEmail') or '').strip().lower()
+                doc_rec = _doctor_collection_reference().child(doctor_email.replace('.', ',')).get() or {}
+                doc_hosp = str(doc_rec.get('hospitalId') or '').strip().lower()
+                if patient_hosp and patient_hosp != admin_hosp and doc_hosp and doc_hosp != admin_hosp:
+                    return api_error('Access denied for this hospital patient record.', 403)
+
+    return fn(*args, **kwargs)
+
+
 def require_auth(roles=None, patient_id_arg=None):
     allowed_roles = {str(role).strip().lower() for role in (roles or []) if str(role).strip()}
 
     def decorator(fn):
         @wraps(fn)
         def wrapper(*args, **kwargs):
-            payload, auth_error = _require_auth_payload()
-            if auth_error:
-                return auth_error
-
-            role = str(payload.get('role') or '').strip().lower()
-            if allowed_roles and role not in allowed_roles:
-                return api_error('Forbidden. You are not authorized to perform this action.', 403)
-
-            if patient_id_arg:
-                target_patient_id = str(kwargs.get(patient_id_arg) or '').strip()
-                if role == 'patient':
-                    requester_patient_id = str(payload.get('patientId') or '').strip()
-                    if not requester_patient_id or requester_patient_id != target_patient_id:
-                        return api_error('Access denied for this patient record.', 403)
-
-                if role == 'doctor':
-                    doctor_id = str(payload.get('doctorId') or payload.get('email') or payload.get('uid') or '').strip().lower()
-                    if not doctor_id:
-                        return api_error('Forbidden. Doctor context is missing from token.', 403)
-
-                    record = _patient_collection_reference().child(target_patient_id).get()
-                    if not isinstance(record, dict):
-                        return api_error('Patient not found.', 404)
-                    if not _doctor_owns_record(record, doctor_id):
-                        return api_error('Access denied for this patient record.', 403)
-
-            return fn(*args, **kwargs)
+            return _execute_auth_guard(fn, allowed_roles, patient_id_arg, args, kwargs)
 
         return wrapper
 
@@ -2980,56 +3086,418 @@ def _consume_reset_token(token, user_type, user_key, email):
     return True, ''
 
 
-@app.route('/doctor/signup', methods=['POST'])
-def doctor_signup():
+def _ensure_default_super_admin():
     try:
+        admin_ref = _admin_collection_reference()
+        all_admins = admin_ref.get()
+        if isinstance(all_admins, dict):
+            for a in all_admins.values():
+                if isinstance(a, dict) and a.get('role') == 'super_admin':
+                    return
+
+        default_email = os.getenv('SUPER_ADMIN_EMAIL', 'admin@smarthealth.io').strip().lower()
+        default_password = os.getenv('SUPER_ADMIN_PASSWORD', 'Admin@SmartHealth2026!')
+        admin_id = 'ADMIN-ROOT-001'
+        admin_ref.child(default_email.replace('.', ',')).set({
+            'id': admin_id,
+            'adminId': admin_id,
+            'email': default_email,
+            'name': 'System Super Admin',
+            'role': 'super_admin',
+            'isActive': True,
+            'passwordHash': generate_password_hash(default_password),
+            'createdAt': datetime.now(timezone.utc).isoformat(),
+        })
+        print(f"[Auth] Initialized default super admin: {default_email}")
+    except Exception as e:
+        print(f"[Auth] Super admin initialization check: {e}")
+
+
+@app.route('/api/auth/admin/login', methods=['POST'])
+@app.route('/admin/login', methods=['POST'])
+def admin_login():
+    try:
+        client_ip = _get_client_ip()
+        allowed, remaining = _check_rate_limit(f"admin_login_{client_ip}", max_requests=10, window_seconds=300)
+        if not allowed:
+            return api_error(f'Too many login attempts. Please wait {remaining} seconds.', 429)
+
         data = request.get_json(silent=True) or {}
         email = str(data.get('email') or '').strip().lower()
-        phone = str(data.get('phone') or '').strip()
-        name = str(data.get('name') or '').strip() or email.split('@')[0]
         password = str(data.get('password') or '')
 
-        if not email or not phone or len(password) < 6:
-            return api_error('Name, email, phone, and password (min 6 chars) are required.', 400)
+        if not email or not password:
+            return api_error('Email and password are required.', 400)
 
-        if not _normalize_phone(phone):
-            return api_error('Valid doctor phone number is required.', 400)
+        admin = _admin_collection_reference().child(email.replace('.', ',')).get()
+        if not isinstance(admin, dict):
+            all_admins = _admin_collection_reference().get()
+            if isinstance(all_admins, dict):
+                for k, a in all_admins.items():
+                    if isinstance(a, dict) and str(a.get('email') or '').strip().lower() == email:
+                        admin = a
+                        break
 
-        doctor_ref = _doctor_collection_reference().child(email.replace('.', ','))
-        existing = doctor_ref.get()
-        if existing:
-            return api_error('Doctor account already exists for this email.', 409)
+        if not isinstance(admin, dict):
+            return api_error('Invalid email or password.', 401)
 
-        if _doctor_matches_by_phone(phone):
-            return api_error('Doctor account already exists for this phone number.', 409)
+        if admin.get('isActive') is False or admin.get('status') == 'deactivated':
+            return api_error('Account has been deactivated. Please contact an administrator.', 403)
 
-        doctor_ref.set({
-            'id': email,
-            'name': name,
-            'email': email,
-            'phone': phone,
-            'passwordHash': generate_password_hash(password),
-            'createdAt': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        })
+        password_hash = str(admin.get('passwordHash') or '')
+        if not password_hash or not check_password_hash(password_hash, password):
+            return api_error('Invalid email or password.', 401)
+
+        role = str(admin.get('role') or 'super_admin').strip().lower()
+        admin_id = str(admin.get('id') or admin.get('adminId') or email)
+        admin_name = str(admin.get('name') or 'Administrator').strip()
+        hospital_id = str(admin.get('hospitalId') or '')
+        hospital_name = str(admin.get('hospitalName') or '')
 
         auth = _issue_auth_token({
-            'role': 'doctor',
+            'role': role,
+            'adminId': admin_id,
+            'id': admin_id,
             'email': email,
-            'name': name,
-            'phone': phone,
+            'name': admin_name,
+            'hospitalId': hospital_id,
+            'hospitalName': hospital_name,
         })
 
-        return api_success('Doctor signup successful.', {
-            'doctor': {'id': email, 'name': name, 'email': email, 'phone': phone},
+        return api_success('Admin login successful.', {
+            'admin': {
+                'id': admin_id,
+                'name': admin_name,
+                'email': email,
+                'role': role,
+                'hospitalId': hospital_id,
+                'hospitalName': hospital_name,
+            },
             'auth': auth,
         })
     except Exception as error:
         return api_error(str(error), 500)
 
 
+@app.route('/api/admin/provision/hospital-admin', methods=['POST'])
+@require_auth(roles={'super_admin'})
+def provision_hospital_admin():
+    try:
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email') or '').strip().lower()
+        password = str(data.get('password') or '')
+        name = str(data.get('name') or '').strip()
+        phone = str(data.get('phone') or '').strip()
+        hospital_id = str(data.get('hospitalId') or '').strip()
+        hospital_name = str(data.get('hospitalName') or '').strip()
+
+        if not email or not password or not name or not hospital_id:
+            return api_error('Name, email, password, and hospitalId are required.', 400)
+
+        is_strong, pwd_err = _is_strong_password(password)
+        if not is_strong:
+            return api_error(pwd_err, 400)
+
+        if not _is_valid_email(email):
+            return api_error('Valid email address is required.', 400)
+
+        admin_ref = _admin_collection_reference().child(email.replace('.', ','))
+        if admin_ref.get():
+            return api_error('An administrator account already exists with this email.', 409)
+
+        requester = _read_auth_payload()
+        admin_id = f"HOSP-ADMIN-{uuid.uuid4().hex[:6].upper()}"
+
+        record = {
+            'id': admin_id,
+            'adminId': admin_id,
+            'email': email,
+            'name': name,
+            'phone': phone,
+            'role': 'hospital_admin',
+            'hospitalId': hospital_id,
+            'hospitalName': hospital_name or hospital_id,
+            'isActive': True,
+            'passwordHash': generate_password_hash(password),
+            'provisionedBy': requester.get('adminId') or requester.get('email'),
+            'createdAt': datetime.now(timezone.utc).isoformat(),
+        }
+
+        admin_ref.set(record)
+
+        sanitized = dict(record)
+        sanitized.pop('passwordHash', None)
+
+        return api_success('Hospital Administrator provisioned successfully.', {
+            'hospitalAdmin': sanitized,
+            **sanitized,
+        }, 201)
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/provision/doctor', methods=['POST'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def provision_doctor():
+    try:
+        data = request.get_json(silent=True) or {}
+        email = str(data.get('email') or '').strip().lower()
+        password = str(data.get('password') or '')
+        name = str(data.get('name') or '').strip()
+        phone = str(data.get('phone') or '').strip()
+        specialty = str(data.get('specialty') or 'General Medicine').strip()
+        hospital_id = str(data.get('hospitalId') or '').strip()
+
+        requester = _read_auth_payload()
+        requester_role = requester.get('role')
+
+        if requester_role == 'hospital_admin':
+            admin_hosp = str(requester.get('hospitalId') or '').strip()
+            if hospital_id and hospital_id.lower() != admin_hosp.lower():
+                return api_error('Hospital administrators can only provision doctors for their assigned hospital.', 403)
+            hospital_id = admin_hosp
+
+        if not email or not password or not name or not phone:
+            return api_error('Name, email, phone, and password are required.', 400)
+
+        is_strong, pwd_err = _is_strong_password(password)
+        if not is_strong:
+            return api_error(pwd_err, 400)
+
+        if not _is_valid_email(email):
+            return api_error('Valid email address is required.', 400)
+
+        if not _normalize_phone(phone):
+            return api_error('Valid doctor phone number is required.', 400)
+
+        doctor_ref = _doctor_collection_reference().child(email.replace('.', ','))
+        if doctor_ref.get():
+            return api_error('A doctor account already exists with this email.', 409)
+
+        if _doctor_matches_by_phone(phone):
+            return api_error('Doctor account already exists for this phone number.', 409)
+
+        doc_id = f"DOC-{uuid.uuid4().hex[:6].upper()}"
+
+        record = {
+            'id': doc_id,
+            'doctorId': doc_id,
+            'email': email,
+            'name': name,
+            'phone': phone,
+            'specialty': specialty,
+            'hospitalId': hospital_id,
+            'role': 'doctor',
+            'isActive': True,
+            'passwordHash': generate_password_hash(password),
+            'provisionedBy': requester.get('adminId') or requester.get('email'),
+            'createdAt': datetime.now(timezone.utc).isoformat(),
+        }
+
+        doctor_ref.set(record)
+
+        sanitized = dict(record)
+        sanitized.pop('passwordHash', None)
+
+        return api_success('Doctor provisioned successfully.', {
+            'doctor': sanitized,
+            **sanitized,
+        }, 201)
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/accounts/toggle-status', methods=['POST'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def toggle_account_status():
+    try:
+        data = request.get_json(silent=True) or {}
+        target_type = str(data.get('targetType') or data.get('role') or '').strip().lower()
+        target_id = str(data.get('targetId') or data.get('accountId') or '').strip()
+        if 'isActive' in data:
+            active = bool(data.get('isActive'))
+        else:
+            active = bool(data.get('active', False))
+
+        if not target_type or not target_id:
+            return api_error('targetType and targetId are required.', 400)
+
+        requester = _read_auth_payload()
+        requester_role = requester.get('role')
+        requester_id = str(requester.get('adminId') or requester.get('email') or '').strip().lower()
+
+        if target_id.lower() == requester_id or target_id.lower() == str(requester.get('email') or '').strip().lower():
+            return api_error('Administrators cannot deactivate their own account.', 400)
+
+        if target_type == 'hospital_admin':
+            if requester_role != 'super_admin':
+                return api_error('Only super administrators can toggle hospital administrator accounts.', 403)
+            ref = _admin_collection_reference().child(target_id.replace('.', ','))
+            existing = ref.get()
+            if not existing:
+                ref = _admin_collection_reference().child(target_id)
+                existing = ref.get()
+            if not existing:
+                all_admins = _admin_collection_reference().get()
+                if isinstance(all_admins, dict):
+                    for k, a in all_admins.items():
+                        if isinstance(a, dict) and (a.get('id') == target_id or a.get('adminId') == target_id or a.get('email') == target_id):
+                            ref = _admin_collection_reference().child(k)
+                            existing = a
+                            break
+            if not existing:
+                return api_error('Hospital administrator not found.', 404)
+            ref.update({'isActive': active, 'status': 'active' if active else 'deactivated'})
+
+        elif target_type == 'doctor':
+            ref = _doctor_collection_reference().child(target_id.replace('.', ','))
+            existing = ref.get()
+            if not existing:
+                ref = _doctor_collection_reference().child(target_id)
+                existing = ref.get()
+            if not existing:
+                all_docs = _doctor_collection_reference().get()
+                if isinstance(all_docs, dict):
+                    for k, d in all_docs.items():
+                        if isinstance(d, dict) and (d.get('id') == target_id or d.get('doctorId') == target_id or d.get('email') == target_id):
+                            ref = _doctor_collection_reference().child(k)
+                            existing = d
+                            break
+            if not existing:
+                return api_error('Doctor not found.', 404)
+            if requester_role == 'hospital_admin':
+                doc_hosp = str(existing.get('hospitalId') or '').strip().lower()
+                admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+                if doc_hosp != admin_hosp:
+                    return api_error('Hospital administrators can only toggle doctors in their hospital.', 403)
+            ref.update({'isActive': active, 'status': 'active' if active else 'deactivated'})
+
+        elif target_type == 'patient':
+            ref = _patient_collection_reference().child(target_id)
+            existing = ref.get()
+            if not existing:
+                all_pats = _patient_collection_reference().get()
+                if isinstance(all_pats, dict):
+                    for k, p in all_pats.items():
+                        if isinstance(p, dict) and (p.get('id') == target_id or p.get('patientId') == target_id or p.get('email') == target_id):
+                            ref = _patient_collection_reference().child(k)
+                            existing = p
+                            break
+            if not existing:
+                return api_error('Patient not found.', 404)
+            ref.update({'isActive': active, 'status': 'active' if active else 'deactivated'})
+        else:
+            return api_error('Invalid targetType. Must be doctor, patient, or hospital_admin.', 400)
+
+        status_text = 'activated' if active else 'deactivated'
+        return api_success(f'Account {status_text} successfully.', {
+            'targetType': target_type,
+            'targetId': target_id,
+            'active': active,
+            'isActive': active,
+        })
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/accounts', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_admin_accounts():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+        admins_raw = _admin_collection_reference().get() or {}
+
+        doctors = []
+        if isinstance(doctors_raw, dict):
+            for k, doc in doctors_raw.items():
+                if isinstance(doc, dict):
+                    if role == 'hospital_admin' and str(doc.get('hospitalId') or '').strip().lower() != admin_hosp:
+                        continue
+                    item = dict(doc)
+                    item.pop('passwordHash', None)
+                    item.pop('password', None)
+                    item['id'] = item.get('id') or item.get('doctorId') or k
+                    doctors.append(item)
+
+        patients = []
+        if isinstance(patients_raw, dict):
+            for k, pat in patients_raw.items():
+                if isinstance(pat, dict):
+                    item = dict(pat)
+                    item.pop('passwordHash', None)
+                    item.pop('password', None)
+                    item['id'] = item.get('id') or item.get('patientId') or k
+                    patients.append(item)
+
+        admins = []
+        if role == 'super_admin' and isinstance(admins_raw, dict):
+            for k, adm in admins_raw.items():
+                if isinstance(adm, dict):
+                    item = dict(adm)
+                    item.pop('passwordHash', None)
+                    item.pop('password', None)
+                    item['id'] = item.get('id') or item.get('adminId') or k
+                    admins.append(item)
+
+        return api_success('Accounts fetched successfully.', {
+            'doctors': doctors,
+            'patients': patients,
+            'admins': admins,
+        })
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/api/admin/stats', methods=['GET'])
+@app.route('/admin/stats', methods=['GET'])
+@require_auth(roles={'super_admin', 'hospital_admin'})
+def get_admin_system_stats():
+    try:
+        requester = _read_auth_payload()
+        role = requester.get('role')
+        admin_hosp = str(requester.get('hospitalId') or '').strip().lower()
+
+        doctors_raw = _doctor_collection_reference().get() or {}
+        patients_raw = _patient_collection_reference().get() or {}
+        admins_raw = _admin_collection_reference().get() or {}
+
+        doc_count = sum(1 for d in doctors_raw.values() if isinstance(d, dict) and (role == 'super_admin' or str(d.get('hospitalId') or '').strip().lower() == admin_hosp))
+        pat_count = sum(1 for p in patients_raw.values() if isinstance(p, dict))
+        admin_count = sum(1 for a in admins_raw.values() if isinstance(a, dict))
+
+        return api_success('Admin stats fetched successfully.', {
+            'stats': {
+                'totalDoctors': doc_count,
+                'totalPatients': pat_count,
+                'totalAdmins': admin_count if role == 'super_admin' else 1,
+                'role': role,
+                'hospitalId': admin_hosp,
+            }
+        })
+    except Exception as error:
+        return api_error(str(error), 500)
+
+
+@app.route('/doctor/signup', methods=['POST'])
+def doctor_signup():
+    return api_error('Public doctor registration is disabled. Doctor accounts must be provisioned by an authorized administrator.', 403)
+
+
 @app.route('/doctor/login', methods=['POST'])
+@app.route('/api/doctor/login', methods=['POST'])
+@app.route('/api/auth/doctor/login', methods=['POST'])
 def doctor_login():
     try:
+        client_ip = _get_client_ip()
+        allowed, remaining = _check_rate_limit(f"doctor_login_{client_ip}", max_requests=10, window_seconds=300)
+        if not allowed:
+            return api_error(f'Too many login attempts. Please wait {remaining} seconds.', 429)
+
         data = request.get_json(silent=True) or {}
         email = str(data.get('email') or '').strip().lower()
         password = str(data.get('password') or '')
@@ -3038,28 +3506,46 @@ def doctor_login():
             return api_error('Email and password are required.', 400)
 
         doctor = _doctor_collection_reference().child(email.replace('.', ',')).get()
-        if not doctor:
+        if not doctor or not isinstance(doctor, dict):
+            all_docs = _doctor_collection_reference().get()
+            if isinstance(all_docs, dict):
+                for k, d in all_docs.items():
+                    if isinstance(d, dict) and str(d.get('email') or '').strip().lower() == email:
+                        doctor = d
+                        break
+
+        if not doctor or not isinstance(doctor, dict):
             return api_error('Invalid email or password.', 401)
+
+        if doctor.get('isActive') is False or doctor.get('status') == 'deactivated':
+            return api_error('Account has been deactivated. Please contact an administrator.', 403)
 
         password_hash = str((doctor or {}).get('passwordHash') or '')
         if not password_hash or not check_password_hash(password_hash, password):
             return api_error('Invalid email or password.', 401)
 
+        doctor_id = str(doctor.get('id') or doctor.get('doctorId') or email)
         doctor_name = doctor.get('name') or email.split('@')[0]
         doctor_phone = doctor.get('phone') or ''
+        hospital_id = doctor.get('hospitalId') or ''
         auth = _issue_auth_token({
             'role': 'doctor',
+            'doctorId': doctor_id,
+            'id': doctor_id,
             'email': email,
             'name': doctor_name,
             'phone': doctor_phone,
+            'hospitalId': hospital_id,
         })
 
         return api_success('Doctor login successful.', {
             'doctor': {
-                'id': email,
+                'id': doctor_id,
+                'doctorId': doctor_id,
                 'name': doctor_name,
                 'email': email,
                 'phone': doctor_phone,
+                'hospitalId': hospital_id,
             },
             'auth': auth,
         })
@@ -3679,7 +4165,11 @@ def add_patient_legacy():
 
         patient_id = _generate_patient_id()
         generated_password = _generate_secure_password(12)
-        payload['password'] = generated_password
+        payload['passwordHash'] = generate_password_hash(generated_password)
+        payload['isActive'] = True
+        payload['role'] = 'patient'
+        # Do not persist plaintext password to database
+        payload.pop('password', None)
 
         record = _write_patient_record(patient_id, payload)
         response_patient = _sanitize_patient_response(record)
@@ -3751,8 +4241,15 @@ def add_patient_legacy():
 
 
 @app.route('/login-patient', methods=['POST'])
+@app.route('/patient/login', methods=['POST'])
+@app.route('/api/auth/patient/login', methods=['POST'])
 def login_patient():
     try:
+        client_ip = _get_client_ip()
+        allowed, remaining = _check_rate_limit(f"patient_login_{client_ip}", max_requests=10, window_seconds=300)
+        if not allowed:
+            return api_error(f'Too many login attempts. Please wait {remaining} seconds.', 429)
+
         data = request.get_json(silent=True) or {}
         patient_id = str(data.get('patientId') or data.get('id') or '').strip()
         password = str(data.get('password') or '').strip()
@@ -3761,17 +4258,37 @@ def login_patient():
             return api_error('Patient ID and password are required.', 400)
 
         record = _patient_collection_reference().child(patient_id).get()
-        if not record:
+        if not record or not isinstance(record, dict):
             return api_error('Invalid Patient ID or password.', 401)
 
-        stored_password = str((record or {}).get('password') or '')
-        if stored_password != password:
+        if record.get('isActive') is False or record.get('status') == 'deactivated':
+            return api_error('Account has been deactivated. Please contact an administrator.', 403)
+
+        stored_hash = str(record.get('passwordHash') or '')
+        stored_password = str(record.get('password') or '')
+
+        valid_password = False
+        if stored_hash and check_password_hash(stored_hash, password):
+            valid_password = True
+        elif stored_password and stored_password == password:
+            valid_password = True
+            # Upgrade legacy record to hashed password and purge plaintext
+            try:
+                _patient_collection_reference().child(patient_id).update({
+                    'passwordHash': generate_password_hash(password),
+                    'password': None,
+                })
+            except Exception:
+                pass
+
+        if not valid_password:
             return api_error('Invalid Patient ID or password.', 401)
 
         normalized = _normalize_patient_record(patient_id, record, record)
         auth = _issue_auth_token({
             'role': 'patient',
             'patientId': patient_id,
+            'id': patient_id,
             'name': normalized.get('name') or 'Patient',
             'email': normalized.get('email') or '',
             'phone': normalized.get('phone') or '',
@@ -6776,6 +7293,12 @@ def serve_frontend_assets_or_spa(path=''):
             return send_from_directory(str(frontend_dist), 'index.html')
 
     return jsonify({"status": "error", "message": f"Endpoint /{path} not found"}), 404
+
+
+try:
+    _ensure_default_super_admin()
+except Exception as _admin_init_err:
+    print(f"[Auth] Notice: Super admin bootstrap deferred: {_admin_init_err}")
 
 
 if __name__ == '__main__':

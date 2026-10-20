@@ -352,15 +352,25 @@ export function LoginSelection() {
                 </div>
               </div>
 
-              {/* Bottom: Create Account Link */}
-              <div className="mt-7 pt-5 border-t border-slate-100 text-center text-xs sm:text-sm text-slate-500">
-                <span>New to Smart Healthcare? </span>
+              {/* Bottom: Create Account & Administrator Links */}
+              <div className="mt-7 pt-5 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between text-xs sm:text-sm text-slate-500 gap-3">
+                <div>
+                  <span>New to Smart Healthcare? </span>
+                  <Link
+                    to="/signup"
+                    className="font-bold text-[#1677FF] hover:text-blue-700 inline-flex items-center gap-1 transition-colors"
+                  >
+                    <span>Create patient account</span>
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </Link>
+                </div>
+
                 <Link
-                  to="/signup"
-                  className="font-bold text-[#1677FF] hover:text-blue-700 inline-flex items-center gap-1 transition-colors"
+                  to="/login/admin"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-100 hover:text-indigo-600 transition"
                 >
-                  <span>Create an account</span>
-                  <ArrowRight className="h-3.5 w-3.5" />
+                  <ShieldCheck className="h-3.5 w-3.5 text-indigo-600" />
+                  <span>Administrator Portal</span>
                 </Link>
               </div>
             </div>

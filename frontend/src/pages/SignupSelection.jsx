@@ -106,7 +106,7 @@ export function SignupSelection() {
                   {t('auth.signupSelection.doctorTitle')}
                 </h3>
                 <p className="mt-2 text-xs sm:text-sm text-slate-600 leading-relaxed">
-                  {t('auth.signupSelection.doctorDescription')}
+                  Doctor and clinical staff accounts are issued directly by hospital administrators. Check access status or sign in.
                 </p>
               </div>
 
@@ -115,7 +115,7 @@ export function SignupSelection() {
                   to="/signup/doctor"
                   className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-[#059669] px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm shadow-emerald-500/25 transition hover:bg-emerald-700"
                 >
-                  <span>Continue as Doctor</span>
+                  <span>Clinician Access & Provisioning</span>
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </Link>
               </div>

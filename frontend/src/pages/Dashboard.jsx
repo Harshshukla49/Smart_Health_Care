@@ -72,6 +72,7 @@ import { DoctorEmergencyCenter } from '../components/emergency/DoctorEmergencyCe
 import { EmergencyMap } from '../components/emergency/EmergencyMap';
 import { AiHealthAssessment } from '../components/AiHealthAssessment';
 import { MedicationManagement } from '../components/MedicationManagement';
+import { AdminControlCenter } from '../components/AdminControlCenter';
 
 export function Dashboard() {
   return (
@@ -113,7 +114,8 @@ function DashboardBody({ liveVitals }) {
   } = liveVitals;
 
   const session = getAuthSession();
-  const role = session?.role === 'doctor' ? 'doctor' : 'patient';
+  const isAdmin = session?.role === 'super_admin' || session?.role === 'hospital_admin';
+  const role = session?.role === 'doctor' ? 'doctor' : (isAdmin ? session.role : 'patient');
   const isDoctor = role === 'doctor';
 
   const [activeSection, setActiveSection] = useState('overview');
@@ -559,6 +561,21 @@ function DashboardBody({ liveVitals }) {
       });
     }
   };
+
+  if (isAdmin) {
+    return (
+      <DashboardLayout
+        role={role}
+        title={session?.role === 'super_admin' ? 'Super Administrator Console' : 'Hospital Administrator Console'}
+        subtitle="Clinical Identity Directory, Clinician Provisioning & Access Governance"
+        backLabel={t('common.backToHome')}
+        activeSection="admin-console"
+        onSectionSelect={() => {}}
+      >
+        <AdminControlCenter session={session} />
+      </DashboardLayout>
+    );
+  }
 
   return (
     <DashboardLayout

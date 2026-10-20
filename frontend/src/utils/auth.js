@@ -3,10 +3,16 @@ const AUTH_STORAGE_KEY = 'smart-health-auth-session';
 export const DASHBOARD_ROUTES = {
   patient: '/dashboard',
   doctor: '/dashboard',
+  hospital_admin: '/dashboard',
+  super_admin: '/dashboard',
 };
 
 export function normalizeRole(role) {
-  return role === 'doctor' ? 'doctor' : 'patient';
+  const clean = String(role || '').trim().toLowerCase();
+  if (clean === 'super_admin') return 'super_admin';
+  if (clean === 'hospital_admin') return 'hospital_admin';
+  if (clean === 'doctor') return 'doctor';
+  return 'patient';
 }
 
 export function getDashboardPathForRole(role) {
