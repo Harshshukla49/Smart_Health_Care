@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <defs>
+    <linearGradient id="medGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="100%" stop-color="#0d9488" />
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#0284c7" flood-opacity="0.3" />
+    </filter>
+  </defs>
+  <!-- Rounded Squircle Badge -->
+  <rect x="24" y="24" width="464" height="464" rx="128" fill="url(#medGrad)" filter="url(#shadow)" />
+  
+  <!-- Crisp Medical Cross -->
+  <rect x="220" y="116" width="72" height="280" rx="36" fill="#ffffff" />
+  <rect x="116" y="220" width="280" height="72" rx="36" fill="#ffffff" />
+  
+  <!-- Dynamic Heart Rhythm / ECG Accent Pulse -->
+  <path d="M140 256 H200 L220 220 L248 300 L276 196 L298 280 L314 256 H372" 
+        stroke="#0284c7" stroke-width="16" stroke-linecap="round" stroke-linejoin="round" />
+</svg>

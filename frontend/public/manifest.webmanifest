@@ -1,0 +1,67 @@
+{
+  "name": "Smart Health Care",
+  "short_name": "SmartHealth",
+  "description": "Enterprise-grade remote patient monitoring, emergency telemetry, live hospital discovery, and clinical healthcare platform.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "theme_color": "#0284c7",
+  "background_color": "#0f172a",
+  "categories": ["medical", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Clinical Dashboard",
+      "short_name": "Dashboard",
+      "description": "View live patient vitals, telemetry, and clinical overview",
+      "url": "/dashboard",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Emergency Hospital Map",
+      "short_name": "Emergency",
+      "description": "Access emergency trauma centers and GPS hospital discovery",
+      "url": "/dashboard#alerts",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Live Vitals Telemetry",
+      "short_name": "Vitals",
+      "description": "Monitor heart rate, SpO2, and ECG rhythm in real time",
+      "url": "/dashboard#vitals",
+      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

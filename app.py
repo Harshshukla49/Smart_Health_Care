@@ -6758,17 +6758,19 @@ def generate_patient_medical_report_api(patient_id):
         return api_error(str(err), 500)
 
 
+@app.route('/')
 @app.route('/<path:path>')
-def serve_frontend_assets_or_spa(path):
+def serve_frontend_assets_or_spa(path=''):
     # Never intercept backend API routes
-    if path.startswith('api/') or path in ['patients', 'real-data', 'health', 'socket.io']:
+    if path and (path.startswith('api/') or path in ['patients', 'real-data', 'health', 'socket.io']):
         return jsonify({"status": "error", "message": f"Endpoint /{path} not found"}), 404
 
     frontend_dist = BASE_DIR / 'frontend' / 'dist'
     if frontend_dist.exists():
-        candidate_file = frontend_dist / path
-        if candidate_file.is_file():
-            return send_from_directory(str(frontend_dist), path)
+        if path:
+            candidate_file = frontend_dist / path
+            if candidate_file.is_file():
+                return send_from_directory(str(frontend_dist), path)
         index_file = frontend_dist / 'index.html'
         if index_file.is_file():
             return send_from_directory(str(frontend_dist), 'index.html')

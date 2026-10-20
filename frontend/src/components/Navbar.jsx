@@ -6,6 +6,7 @@ import toast from 'react-hot-toast';
 import { navigationLinks } from '../data/demoData';
 import { Sidebar } from './Sidebar';
 import { LanguageSwitcher } from './LanguageSwitcher';
+import { PwaInstallButton } from './pwa/PwaInstallButton';
 import { useI18n } from '../context/I18nContext';
 import { clearAuthSession, getAuthSession } from '../utils/auth';
 
@@ -65,8 +66,11 @@ export function Navbar() {
             ))}
           </nav>
 
-          <div className="hidden lg:flex">
-            <LanguageSwitcher compact />
+          <div className="flex items-center gap-2">
+            <PwaInstallButton size="sm" variant="outline" className="hidden sm:inline-flex" />
+            <div className="hidden lg:flex">
+              <LanguageSwitcher compact />
+            </div>
           </div>
 
           {session ? (

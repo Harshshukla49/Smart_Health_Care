@@ -5,13 +5,28 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f8fafc" />
-    <title>Smart Healthcare Remote Monitoring System</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0284c7" />
+    <title>Smart Health Care — Remote Patient Monitoring & Telehealth</title>
     <meta
       name="description"
-      content="Modern remote patient monitoring dashboard with vitals, alerts, and predictive health insights."
+      content="Enterprise-grade remote patient monitoring, emergency telemetry, live hospital discovery, and clinical healthcare platform."
     />
+    
+    <!-- PWA Web App Manifest & App Identity -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+    
+    <!-- iOS / Safari PWA Optimizations -->
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Smart Health Care" />
+    <meta name="application-name" content="Smart Health Care" />
+    <meta name="msapplication-TileColor" content="#0284c7" />
+
     <script>
       (function() {
         try {
@@ -22,6 +37,30 @@
             window.history.replaceState(null, null, redirect);
           }
         } catch (e) {}
+
+        // Register Service Worker in production/supporting environments
+        if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+          window.addEventListener('load', function() {
+            navigator.serviceWorker.register('/sw.js', { scope: '/' })
+              .then(function(reg) {
+                console.log('[PWA] Service Worker registered with scope:', reg.scope);
+                // Listen for updates
+                reg.onupdatefound = function() {
+                  var installingWorker = reg.installing;
+                  if (installingWorker) {
+                    installingWorker.onstatechange = function() {
+                      if (installingWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                        console.log('[PWA] New Smart Health Care version available.');
+                      }
+                    };
+                  }
+                };
+              })
+              .catch(function(err) {
+                console.warn('[PWA] Service Worker registration skipped or failed:', err);
+              });
+          });
+        }
       })();
     </script>
   </head>

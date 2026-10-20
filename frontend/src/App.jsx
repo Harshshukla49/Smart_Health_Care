@@ -27,6 +27,9 @@ import { VideoCallDialerModal } from './components/videocall/VideoCallDialerModa
 import { IncomingCallModal } from './components/videocall/IncomingCallModal';
 import { ActiveVideoCallModal } from './components/videocall/ActiveVideoCallModal';
 import { EmergencyProvider } from './context/EmergencyContext';
+import { PwaProvider } from './context/PwaContext';
+import { IosInstallModal } from './components/pwa/IosInstallModal';
+import { PwaFloatingBanner } from './components/pwa/PwaFloatingBanner';
 
 function AuthRoute({ children }) {
   const session = getAuthSession();
@@ -109,23 +112,28 @@ export default function App() {
   const location = useLocation();
 
   return (
-    <VideoCallProvider>
-      <Toaster
-        position="top-right"
-        toastOptions={{
-          style: {
-            background: 'rgba(15, 23, 42, 0.95)',
-            color: '#e2e8f0',
-            border: '1px solid rgba(148, 163, 184, 0.18)',
-            backdropFilter: 'blur(18px)',
-          },
-        }}
-      />
+    <PwaProvider>
+      <VideoCallProvider>
+        <Toaster
+          position="top-right"
+          toastOptions={{
+            style: {
+              background: 'rgba(15, 23, 42, 0.95)',
+              color: '#e2e8f0',
+              border: '1px solid rgba(148, 163, 184, 0.18)',
+              backdropFilter: 'blur(18px)',
+            },
+          }}
+        />
 
-      {/* Clinical Telehealth Modals (Global Portals) */}
-      <VideoCallDialerModal />
-      <IncomingCallModal />
-      <ActiveVideoCallModal />
+        {/* Clinical Telehealth Modals (Global Portals) */}
+        <VideoCallDialerModal />
+        <IncomingCallModal />
+        <ActiveVideoCallModal />
+
+        {/* PWA Cross-Platform Modals & Floating Install Banner */}
+        <IosInstallModal />
+        <PwaFloatingBanner />
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -183,6 +191,7 @@ export default function App() {
           </Routes>
         </motion.div>
       </AnimatePresence>
-    </VideoCallProvider>
+      </VideoCallProvider>
+    </PwaProvider>
   );
 }

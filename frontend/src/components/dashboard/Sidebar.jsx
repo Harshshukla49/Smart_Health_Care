@@ -25,6 +25,7 @@ import {
 import { clearAuthSession, getAuthSession } from '../../utils/auth';
 import { useI18n } from '../../context/I18nContext';
 import { LanguageSwitcher } from '../LanguageSwitcher';
+import { PwaInstallButton } from '../pwa/PwaInstallButton';
 
 function getNavigationSections(role, t) {
   const isDoctor = role === 'doctor';
@@ -308,6 +309,12 @@ export function Sidebar({
 
         {/* Sidebar Footer Controls & User Card */}
         <div className="mt-3 border-t border-slate-100 pt-3 space-y-2.5">
+          {!collapsed && (
+            <div className="px-1">
+              <PwaInstallButton size="sm" variant="outline" className="w-full justify-center py-2" />
+            </div>
+          )}
+
           {/* Compact Language Selector for Desktop */}
           {!collapsed && (
             <div className="flex items-center justify-between px-1">
@@ -420,6 +427,7 @@ export function Sidebar({
               </div>
 
               <div className="mt-4 border-t border-slate-100 pt-3 space-y-2.5">
+                <PwaInstallButton size="md" variant="primary" className="w-full justify-center py-2.5 shadow-sm" />
                 <div className="flex items-center justify-between px-1">
                   <span className="text-xs font-semibold text-slate-600">{t('layout.languageLabel')}</span>
                   <LanguageSwitcher compact theme="light" />
