@@ -1,0 +1,97 @@
+# ==============================================================================
+# SMART HEALTHCARE - ISOLATED CLOUD STAGING BLUEPRINT (RENDER)
+# ==============================================================================
+# This blueprint defines dedicated, isolated staging services for Smart Healthcare.
+# Deploying this blueprint creates staging resources completely isolated from
+# the production backend (smart-health-backend-2idf.onrender.com) and
+# production frontend (smart-health-rontend.onrender.com).
+#
+# Cost Tier: Free ($0.00/month) on Render Free Web Service and Free Static Site.
+# ==============================================================================
+
+services:
+  # ----------------------------------------------------------------------------
+  # 1. Staging Python / Flask Backend API
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: smart-health-backend-staging
+    env: python
+    region: oregon
+    plan: free
+    branch: production-readiness-remediation
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn --worker-class gthread -w 1 --threads 100 -b 0.0.0.0:$PORT app:app
+    healthCheckPath: /health
+    envVars:
+      - key: PORT
+        value: 5000
+      - key: PYTHON_VERSION
+        value: 3.11.11
+      - key: ENVIRONMENT
+        value: staging
+      - key: FLASK_DEBUG
+        value: "0"
+      - key: APP_AUTH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://smart-health-frontend-staging.onrender.com,http://localhost:5173
+      - key: SENSOR_ADAPTER
+        value: simulated
+      - key: ALLOW_DEV_DEVICE_INSECURE
+        value: "false"
+      # Dedicated Staging Firebase Realtime Database URL (isolated from production)
+      - key: FIREBASE_DATABASE_URL
+        sync: false
+      # Dedicated Staging Firebase Service Account credentials JSON string
+      - key: FIREBASE_CREDENTIALS_JSON
+        sync: false
+      # Explicitly blanked out in staging so real patient SMS alerts cannot be sent
+      - key: TWILIO_ACCOUNT_SID
+        value: ""
+      - key: TWILIO_AUTH_TOKEN
+        value: ""
+      - key: TWILIO_PHONE_FROM
+        value: ""
+      # Explicitly blanked out in staging so real emails cannot be sent
+      - key: EMAIL_PASSWORD
+        value: ""
+      - key: GMAIL_APP_PASSWORD
+        value: ""
+
+  # ----------------------------------------------------------------------------
+  # 2. Staging Static Frontend UI
+  # ----------------------------------------------------------------------------
+  - type: web
+    name: smart-health-frontend-staging
+    env: static
+    region: oregon
+    plan: free
+    branch: production-readiness-remediation
+    buildCommand: npm --prefix frontend install && npm --prefix frontend run build
+    staticPublishPath: frontend/dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_BASE_URL
+        value: https://smart-health-backend-staging.onrender.com
+      - key: VITE_SOS_API_BASE_URL
+        value: https://smart-health-backend-staging.onrender.com
+      # Staging Firebase Client Config (isolated from production cd723 project)
+      - key: VITE_FIREBASE_API_KEY
+        sync: false
+      - key: VITE_FIREBASE_AUTH_DOMAIN
+        sync: false
+      - key: VITE_FIREBASE_PROJECT_ID
+        sync: false
+      - key: VITE_FIREBASE_APP_ID
+        sync: false
+      - key: VITE_FIREBASE_DATABASE_URL
+        sync: false
+      - key: VITE_FIREBASE_STORAGE_BUCKET
+        sync: false
+      - key: VITE_FIREBASE_MESSAGING_SENDER_ID
+        sync: false
+      - key: VITE_FIREBASE_MEASUREMENT_ID
+        sync: false

@@ -5849,7 +5849,9 @@ def get_doctor_overview():
 
         # 3. Appointments & Pending Consultations
         appointments_raw = _appointments_collection_reference().get() or {}
-        today_str = datetime.now().strftime('%Y-%m-%d')
+        today_local = datetime.now().strftime('%Y-%m-%d')
+        today_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+        today_dates = {today_local, today_utc}
         today_apts = []
         pending_consultations = []
         follow_up_reminders = []
@@ -5862,7 +5864,7 @@ def get_doctor_overview():
                 a_doc_email = str(a.get('doctorEmail') or '').strip().lower()
                 if a_doc == doctor_id or a_doc_email == doctor_id or a.get('doctorName') == requester.get('name'):
                     apt_item = {**a, 'id': aid, 'appointmentId': aid}
-                    if str(a.get('appointmentDate') or '') == today_str:
+                    if str(a.get('appointmentDate') or '') in today_dates:
                         today_apts.append(apt_item)
                     if str(a.get('status') or '').lower() in ('scheduled', 'in-progress'):
                         pending_consultations.append(apt_item)
