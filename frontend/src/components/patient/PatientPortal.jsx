@@ -65,6 +65,11 @@ import {
   updateAppointmentStatus,
   markMedicineTaken,
 } from '../../services/api';
+import {
+  generateMapLinks,
+  getCurrentCoordinates,
+  queryGeolocationPermission,
+} from '../../services/geolocation';
 
 export function PatientPortal({ session, liveVitals, emergency }) {
   const patientId = session?.patientId || session?.id || 'PT-1001';
@@ -147,10 +152,12 @@ export function PatientPortal({ session, liveVitals, emergency }) {
   });
   const [passwordSaving, setPasswordSaving] = useState(false);
 
-  // SOS Location State
+  // SOS Location and Accidental Protection State
   const [currentGps, setCurrentGps] = useState(null);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [sosTriggering, setSosTriggering] = useState(false);
+  const [sosCountdown, setSosCountdown] = useState(5);
+  const [locationPermStatus, setLocationPermStatus] = useState('prompt');
 
   // Load portal summary and notifications on mount
   const loadPortalData = async (isRefresh = false) => {
@@ -227,44 +234,34 @@ export function PatientPortal({ session, liveVitals, emergency }) {
     }
   }, [activeTab]);
 
-  // Handle GPS location capture
-  const captureGpsLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation is not supported by your browser.');
-      return;
-    }
+  // Handle GPS location capture with permission awareness and fallback
+  const captureGpsLocation = async () => {
     setGpsLoading(true);
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = {
-          latitude: Number(pos.coords.latitude.toFixed(5)),
-          longitude: Number(pos.coords.longitude.toFixed(5)),
-          accuracy: Math.round(pos.coords.accuracy),
-          timestamp: new Date().toISOString(),
-        };
-        setCurrentGps(coords);
-        setGpsLoading(false);
-        toast.success(`GPS coordinates secured (±${coords.accuracy}m)`);
-      },
-      (err) => {
-        setGpsLoading(false);
-        console.warn('GPS capture error:', err);
-        // Fallback default coordinates
-        setCurrentGps({
-          latitude: 28.6139,
-          longitude: 77.209,
-          accuracy: 15,
-          timestamp: new Date().toISOString(),
-          isSimulated: true,
-        });
-        toast('Using network-derived positioning.');
-      },
-      { timeout: 10000, enableHighAccuracy: true }
-    );
+    try {
+      const coords = await getCurrentCoordinates({ timeout: 10000 });
+      setCurrentGps(coords);
+      setLocationPermStatus('granted');
+      toast.success(`GPS coordinates secured (±${coords.accuracy}m)`);
+    } catch (err) {
+      if (err.reason === 'permission_denied') {
+        setLocationPermStatus('denied');
+        toast.error('Location permission was denied. Allow location in your browser settings to attach precise coordinates.');
+      } else {
+        setLocationPermStatus('unavailable');
+        toast.error(err.message || 'GPS signal unavailable. Showing emergency hotlines and fallback instructions.');
+      }
+    } finally {
+      setGpsLoading(false);
+    }
   };
 
   useEffect(() => {
-    captureGpsLocation();
+    queryGeolocationPermission().then((perm) => {
+      setLocationPermStatus(perm);
+      if (perm === 'granted') {
+        captureGpsLocation();
+      }
+    });
   }, []);
 
   // Handle Profile Save
@@ -499,6 +496,29 @@ export function PatientPortal({ session, liveVitals, emergency }) {
     }
   };
 
+  // Open SOS Confirmation Modal with 5s countdown
+  const openSosModal = () => {
+    setSosCountdown(5);
+    setShowSosConfirmModal(true);
+  };
+
+  // 5-second accidental trigger countdown timer
+  useEffect(() => {
+    let timer = null;
+    if (showSosConfirmModal) {
+      if (sosCountdown > 0) {
+        timer = setInterval(() => {
+          setSosCountdown((prev) => prev - 1);
+        }, 1000);
+      } else if (sosCountdown === 0) {
+        handleTriggerSos();
+      }
+    }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [showSosConfirmModal, sosCountdown]);
+
   // Handle Trigger SOS
   const handleTriggerSos = async () => {
     setShowSosConfirmModal(false);
@@ -518,6 +538,22 @@ export function PatientPortal({ session, liveVitals, emergency }) {
       toast.error(err?.message || 'Emergency trigger encountered an issue. Please dial 108 / 112 immediately.');
     } finally {
       setSosTriggering(false);
+    }
+  };
+
+  // Handle Cancel SOS
+  const handleCancelSos = async () => {
+    const alertId = emergency?.activeEmergency?.alertId;
+    if (!alertId) {
+      toast.error('No active emergency ID found to cancel.');
+      return;
+    }
+    try {
+      if (emergency?.cancelEmergency) {
+        await emergency.cancelEmergency(alertId, 'Cancelled by patient from portal');
+      }
+    } catch (err) {
+      toast.error('Failed to cancel emergency alert.');
     }
   };
 
@@ -1595,113 +1631,414 @@ export function PatientPortal({ session, liveVitals, emergency }) {
       {/* ========================================================================= */}
       {/* TAB 7: EMERGENCY SOS */}
       {/* ========================================================================= */}
-      {activeTab === 'emergency-sos' && (
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-red-200 bg-gradient-to-r from-red-500/10 via-rose-500/5 to-white p-6 shadow-sm">
-            <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-              <div className="flex items-start gap-4">
-                <div className="h-16 w-16 rounded-2xl bg-gradient-to-tr from-red-600 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-red-500/30 shrink-0">
-                  <Siren className="h-8 w-8 animate-pulse" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-extrabold text-slate-900">Emergency Distress Command (SOS)</h3>
-                  <p className="text-xs text-slate-600 mt-1 max-w-xl">
-                    Broadcasting an SOS alert immediately transmits your live GPS coordinates, telemetry snapshot, and
-                    emergency contact notifications directly to the registered hospital trauma center and emergency
-                    services.
-                  </p>
-                  <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
-                    <MapPin className="h-4 w-4 text-rose-500" />
-                    <span>
-                      GPS Coordinates:{' '}
-                      {currentGps
-                        ? `${currentGps.latitude}, ${currentGps.longitude} (±${currentGps.accuracy}m)`
-                        : 'Acquiring high-precision GPS...'}
+      {activeTab === 'emergency-sos' && (() => {
+        const activeAlert = emergency?.activeEmergency;
+        const isSosActive = activeAlert && activeAlert.status !== 'RESOLVED' && activeAlert.status !== 'CANCELLED';
+        const currentMapLinks = currentGps ? generateMapLinks(currentGps.latitude, currentGps.longitude) : null;
+        const activeMapLinks = activeAlert?.location
+          ? generateMapLinks(activeAlert.location.latitude, activeAlert.location.longitude)
+          : null;
+
+        const prefilledSmsText = `EMERGENCY SOS: Patient ${patient.name || patientName} (ID: ${patientId}) requires immediate medical assistance at location: ${
+          currentGps ? `${currentGps.latitude}, ${currentGps.longitude}` : 'Location Unavailable'
+        }. Please dispatch emergency medical transport.`;
+
+        return (
+          <div className="space-y-6">
+            {/* 1. ACTIVE EMERGENCY DISTRESS EVENT CARD (IF SOS ACTIVE) */}
+            {isSosActive && (
+              <div className="rounded-2xl border-2 border-red-500 bg-red-50/70 p-6 shadow-xl animate-in fade-in duration-300 space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-red-200 pb-4">
+                  <div className="flex items-center gap-3">
+                    <div className="h-12 w-12 rounded-2xl bg-red-600 text-white flex items-center justify-center shadow-lg shadow-red-600/40 animate-pulse shrink-0">
+                      <Siren className="h-6 w-6" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-md bg-red-600 text-white text-[10px] font-extrabold uppercase px-2 py-0.5 tracking-wider">
+                          ACTIVE DISTRESS ALERT
+                        </span>
+                        <span className="font-mono text-xs font-bold text-red-900">
+                          ID: {activeAlert.alertId}
+                        </span>
+                      </div>
+                      <h3 className="text-base font-extrabold text-slate-900 mt-1">
+                        {activeAlert.triggerReason || 'Critical Emergency Broadcasted'}
+                      </h3>
+                      <div className="text-xs text-slate-500">
+                        Triggered at: {activeAlert.createdAt ? new Date(activeAlert.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'Just now'}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="rounded-full bg-red-100 border border-red-300 px-3 py-1 text-xs font-extrabold text-red-700">
+                      STATUS: {activeAlert.status || 'CRITICAL'}
                     </span>
                     <button
-                      onClick={captureGpsLocation}
-                      disabled={gpsLoading}
-                      className="text-sky-600 font-semibold hover:underline ml-2"
+                      onClick={handleCancelSos}
+                      className="px-4 py-2 rounded-xl border border-red-300 bg-white text-xs font-bold text-red-700 hover:bg-red-50 shadow-xs transition"
                     >
-                      {gpsLoading ? 'Locating...' : 'Refresh GPS'}
+                      Cancel Accidental SOS
                     </button>
                   </div>
                 </div>
+
+                {/* Location & Map Links in Active Alert */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                  <div className="p-4 rounded-xl border border-red-200 bg-white space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-800 flex items-center gap-1.5">
+                        <MapPin className="h-4 w-4 text-red-600" />
+                        Reported GPS Coordinates
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        activeAlert.locationStatus === 'ACQUIRED'
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : activeAlert.locationStatus === 'PERMISSION_DENIED'
+                          ? 'bg-amber-100 text-amber-800'
+                          : 'bg-slate-100 text-slate-700'
+                      }`}>
+                        {activeAlert.locationStatus || 'ACQUIRED'}
+                      </span>
+                    </div>
+
+                    <div className="font-mono text-slate-700">
+                      {activeAlert.location?.latitude && activeAlert.location?.longitude
+                        ? `${activeAlert.location.latitude}, ${activeAlert.location.longitude} (±${activeAlert.location.accuracy || 15}m)`
+                        : 'GPS Coordinates not attached'}
+                    </div>
+
+                    {/* Direct clickable Map Links */}
+                    {(activeAlert.mapsUrl || activeMapLinks?.googleMaps) && (
+                      <div className="pt-2 flex flex-wrap items-center gap-2">
+                        <a
+                          href={activeAlert.mapsUrl || activeMapLinks?.googleMaps}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 font-bold text-xs hover:bg-sky-100 transition shadow-2xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Open Google Maps
+                        </a>
+                        <a
+                          href={activeAlert.openStreetMapUrl || activeMapLinks?.openStreetMap}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-xs hover:bg-emerald-100 transition shadow-2xs"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          OpenStreetMap
+                        </a>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Real Notification Delivery Results */}
+                  <div className="p-4 rounded-xl border border-red-200 bg-white space-y-2">
+                    <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                      <Send className="h-4 w-4 text-indigo-600" />
+                      Alert Delivery Status (Truthful Tracking)
+                    </div>
+
+                    <div className="space-y-1.5 text-xs text-slate-600">
+                      <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                        <div>
+                          <div className="font-bold text-slate-900">{activeAlert.hospitalName || hospital.name}</div>
+                          <div className="text-[10px] text-slate-500">Hospital Casualty Desk</div>
+                        </div>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          activeAlert.deliveryStatus?.hospitalEmail?.status === 'DISPATCHED'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : 'bg-slate-200 text-slate-700'
+                        }`}>
+                          {activeAlert.deliveryStatus?.hospitalEmail?.status === 'DISPATCHED'
+                            ? 'Email Dispatched'
+                            : 'Gateway Unconfigured (SMTP not set)'}
+                        </span>
+                      </div>
+
+                      {/* SMS Contact Notification Real Status */}
+                      {Array.isArray(activeAlert.deliveryStatus?.sms) && activeAlert.deliveryStatus.sms.length > 0 ? (
+                        activeAlert.deliveryStatus.sms.map((smsItem, sIdx) => (
+                          <div key={sIdx} className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                            <div>
+                              <div className="font-bold text-slate-900">{smsItem.contactName || 'Caregiver'}</div>
+                              <div className="text-[10px] text-slate-500">{smsItem.phone}</div>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                              smsItem.status === 'DELIVERED'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : smsItem.status === 'PROVIDER_UNCONFIGURED'
+                                ? 'bg-slate-200 text-slate-700'
+                                : 'bg-rose-100 text-rose-800'
+                            }`}>
+                              {smsItem.status === 'DELIVERED'
+                                ? 'Delivered (SMS)'
+                                : smsItem.status === 'PROVIDER_UNCONFIGURED'
+                                ? 'Gateway Unconfigured (Twilio not set)'
+                                : smsItem.status}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-100">
+                          <div>
+                            <div className="font-bold text-slate-900">{patient.emergencyContact || 'Caregiver'}</div>
+                            <div className="text-[10px] text-slate-500">{patient.emergencyPhone || '+91 98765 43210'}</div>
+                          </div>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                            Logged in System
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Medical Transport Ambulance Dispatch Section */}
+                {activeAlert.ambulanceStatus === 'AMBULANCE_REQUESTED' ? (
+                  <div className="p-4 rounded-xl border border-sky-300 bg-sky-50 text-sky-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                    <div className="flex items-center gap-3">
+                      <Ambulance className="h-6 w-6 text-sky-600 animate-bounce shrink-0" />
+                      <div>
+                        <div className="font-bold text-sky-900">
+                          Ambulance Transport Requested & Dispatched
+                        </div>
+                        <div className="text-sky-700">
+                          {activeAlert.ambulanceDetails?.message || 'Paramedics assigned. Unit MED-AMB-409 en route (ETA ~9 mins).'}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full bg-sky-200 text-sky-800 font-extrabold text-[11px] shrink-0">
+                      ETA: ~9 MINS
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end pt-2">
+                    <button
+                      onClick={() => emergency?.requestAmbulance && emergency.requestAmbulance()}
+                      className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-sky-600 text-white font-bold text-xs hover:bg-sky-700 shadow-md shadow-sky-600/20 transition"
+                    >
+                      <Ambulance className="h-4 w-4" />
+                      Request Medical Transport / Ambulance Dispatch
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 2. EMERGENCY TRIGGER HERO CARD */}
+            <div className="rounded-2xl border border-red-200 bg-gradient-to-r from-red-500/10 via-rose-500/5 to-white p-6 shadow-sm">
+              <div className="flex flex-col md:flex-row items-center justify-between gap-6">
+                <div className="flex items-start gap-4">
+                  <div className="h-16 w-16 rounded-2xl bg-gradient-to-tr from-red-600 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-red-500/30 shrink-0">
+                    <Siren className="h-8 w-8 animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-extrabold text-slate-900">Emergency Distress Command (SOS)</h3>
+                    <p className="text-xs text-slate-600 mt-1 max-w-xl">
+                      Broadcasting an SOS alert immediately transmits your live GPS coordinates, telemetry snapshot, and
+                      emergency notifications directly to the registered hospital trauma center and your emergency contacts.
+                    </p>
+                    <div className="mt-2 text-[11px] font-semibold text-rose-700 flex items-center gap-1.5">
+                      <ShieldCheck className="h-3.5 w-3.5" />
+                      Equipped with 5-second accidental-trigger protection window.
+                    </div>
+
+                    {/* GPS Coordinates & Permission Info */}
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+                      <MapPin className="h-4 w-4 text-rose-500 shrink-0" />
+                      <span>
+                        GPS Coordinates:{' '}
+                        {currentGps
+                          ? `${currentGps.latitude}, ${currentGps.longitude} (±${currentGps.accuracy}m)`
+                          : gpsLoading
+                          ? 'Acquiring GPS position...'
+                          : locationPermStatus === 'denied'
+                          ? 'Permission Denied in Browser Settings'
+                          : 'Position not locked'}
+                      </span>
+                      <button
+                        onClick={captureGpsLocation}
+                        disabled={gpsLoading}
+                        className="text-sky-600 font-bold hover:underline ml-2 inline-flex items-center gap-1"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${gpsLoading ? 'animate-spin' : ''}`} />
+                        {gpsLoading ? 'Acquiring...' : 'Refresh GPS'}
+                      </button>
+
+                      {currentMapLinks?.googleMaps && (
+                        <a
+                          href={currentMapLinks.googleMaps}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-sky-700 font-semibold hover:underline inline-flex items-center gap-0.5 ml-2"
+                        >
+                          <ExternalLink className="h-3 w-3" />
+                          Map Preview
+                        </a>
+                      )}
+                    </div>
+
+                    {locationPermStatus === 'denied' && (
+                      <div className="mt-2 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2 flex items-center gap-2">
+                        <Info className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                        <span>
+                          Location blocked: Click the lock icon in your browser URL bar &gt; set Location to "Allow", then click Refresh GPS.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <button
+                  onClick={openSosModal}
+                  disabled={sosTriggering}
+                  className="w-full md:w-auto px-8 py-5 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-base shadow-xl shadow-red-600/30 transform active:scale-95 transition flex items-center justify-center gap-2.5 animate-pulse"
+                >
+                  <AlertOctagon className="h-6 w-6" />
+                  {sosTriggering ? 'DISPATCHING...' : 'TRIGGER SOS NOW'}
+                </button>
+              </div>
+            </div>
+
+            {/* 3. THREE-COLUMN QUICK CONTACTS & HELPLINES */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {/* Emergency Helplines */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <PhoneCall className="h-3.5 w-3.5 text-red-600" />
+                  Emergency Helplines
+                </h4>
+                <div className="space-y-2">
+                  <a
+                    href="tel:108"
+                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Ambulance className="h-5 w-5 text-red-600" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-800">Ambulance Emergency</div>
+                        <div className="text-[10px] text-slate-400">24x7 Free Trauma Dispatch</div>
+                      </div>
+                    </div>
+                    <span className="font-mono font-extrabold text-red-600 text-sm">108</span>
+                  </a>
+                  <a
+                    href="tel:112"
+                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <ShieldAlert className="h-5 w-5 text-indigo-600" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-800">National Emergency</div>
+                        <div className="text-[10px] text-slate-400">Unified Distress Hotline</div>
+                      </div>
+                    </div>
+                    <span className="font-mono font-extrabold text-indigo-600 text-sm">112</span>
+                  </a>
+                  <a
+                    href="tel:102"
+                    className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
+                  >
+                    <div className="flex items-center gap-2.5">
+                      <Heart className="h-5 w-5 text-rose-500" />
+                      <div>
+                        <div className="text-xs font-bold text-slate-800">Maternity & Childcare</div>
+                        <div className="text-[10px] text-slate-400">Specialized Emergency</div>
+                      </div>
+                    </div>
+                    <span className="font-mono font-extrabold text-rose-600 text-sm">102</span>
+                  </a>
+                </div>
               </div>
 
-              <button
-                onClick={() => setShowSosConfirmModal(true)}
-                disabled={sosTriggering}
-                className="w-full md:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-base shadow-xl shadow-red-600/30 transform active:scale-95 transition flex items-center justify-center gap-2"
-              >
-                <AlertOctagon className="h-6 w-6 animate-spin" />
-                TRIGGER SOS NOW
-              </button>
+              {/* Primary Emergency Contact */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <UserCheck className="h-3.5 w-3.5 text-indigo-600" />
+                  Designated SOS Contact
+                </h4>
+                <div className="p-3.5 rounded-xl border border-slate-100 bg-slate-50 space-y-2">
+                  <div className="text-xs font-bold text-slate-900">{patient.emergencyContact || 'Caregiver / Family'}</div>
+                  <div className="text-xs text-slate-500">Authorized primary contact person</div>
+                  <a
+                    href={`tel:${patient.emergencyPhone || '+919876543210'}`}
+                    className="inline-flex items-center gap-1.5 font-bold text-rose-600 text-xs mt-1 hover:underline"
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    {patient.emergencyPhone || '+91 98765 43210'}
+                  </a>
+                </div>
+                <div className="text-[11px] text-slate-400 italic">
+                  Notified automatically whenever distress SOS is triggered.
+                </div>
+              </div>
+
+              {/* Hospital Trauma Ward */}
+              <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <Stethoscope className="h-3.5 w-3.5 text-sky-600" />
+                  Hospital Casualty Desk
+                </h4>
+                <div className="p-3.5 rounded-xl border border-slate-100 bg-slate-50 space-y-2">
+                  <div className="text-xs font-bold text-slate-900">{hospital.name || 'City General Medical Center'}</div>
+                  <div className="text-xs text-slate-500">24x7 Emergency Casualty Ward</div>
+                  <a
+                    href={`tel:${hospital.phone || '+911140001000'}`}
+                    className="inline-flex items-center gap-1.5 font-bold text-sky-600 text-xs mt-1 hover:underline"
+                  >
+                    <Phone className="h-3.5 w-3.5" />
+                    {hospital.phone || '+91 11 4000 1000'}
+                  </a>
+                </div>
+                <div className="text-[11px] text-slate-400">
+                  Direct line to casualty triage staff and duty emergency medical officer.
+                </div>
+              </div>
+            </div>
+
+            {/* 4. OFFLINE EMERGENCY DISPATCH & FALLBACK TEMPLATE */}
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <MessageCircle className="h-4 w-4 text-emerald-600" />
+                    Offline Emergency SMS Dispatch Template
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    If internet connection fails, copy or send this pre-formatted emergency dispatch text to 108 or your emergency contact.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(prefilledSmsText);
+                      toast.success('Emergency SMS template copied to clipboard!');
+                    }}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+                  >
+                    <Copy className="h-3.5 w-3.5 text-slate-500" />
+                    Copy SMS Text
+                  </button>
+                  <a
+                    href={`sms:108?body=${encodeURIComponent(prefilledSmsText)}`}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 transition shadow-2xs"
+                  >
+                    <Send className="h-3.5 w-3.5" />
+                    Send SMS to 108
+                  </a>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-800 leading-relaxed select-all">
+                {prefilledSmsText}
+              </div>
             </div>
           </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {/* Quick Helplines */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Emergency Helplines</h4>
-              <div className="space-y-2">
-                <a
-                  href="tel:108"
-                  className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <Ambulance className="h-5 w-5 text-red-600" />
-                    <span className="text-xs font-bold text-slate-800">Ambulance Emergency</span>
-                  </div>
-                  <span className="font-mono font-extrabold text-red-600 text-sm">108</span>
-                </a>
-                <a
-                  href="tel:112"
-                  className="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-slate-100 transition"
-                >
-                  <div className="flex items-center gap-2.5">
-                    <ShieldAlert className="h-5 w-5 text-indigo-600" />
-                    <span className="text-xs font-bold text-slate-800">National Emergency</span>
-                  </div>
-                  <span className="font-mono font-extrabold text-indigo-600 text-sm">112</span>
-                </a>
-              </div>
-            </div>
-
-            {/* Primary Emergency Contact */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Emergency Contact</h4>
-              <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 space-y-1">
-                <div className="text-xs font-bold text-slate-900">{patient.emergencyContact || 'Caregiver / Family'}</div>
-                <div className="text-xs text-slate-500">Authorized primary contact person</div>
-                <a
-                  href={`tel:${patient.emergencyPhone || '+919876543210'}`}
-                  className="inline-flex items-center gap-1.5 font-bold text-rose-600 text-xs mt-2 hover:underline"
-                >
-                  <Phone className="h-3.5 w-3.5" />
-                  {patient.emergencyPhone || '+91 98765 43210'}
-                </a>
-              </div>
-            </div>
-
-            {/* Hospital Trauma Ward */}
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-xs space-y-3">
-              <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Hospital Desk</h4>
-              <div className="p-3 rounded-xl border border-slate-100 bg-slate-50 space-y-1">
-                <div className="text-xs font-bold text-slate-900">{hospital.name || 'City General Medical Center'}</div>
-                <div className="text-xs text-slate-500">24x7 Emergency Casualty Ward</div>
-                <a
-                  href={`tel:${hospital.phone || '+911140001000'}`}
-                  className="inline-flex items-center gap-1.5 font-bold text-sky-600 text-xs mt-2 hover:underline"
-                >
-                  <Phone className="h-3.5 w-3.5" />
-                  {hospital.phone || '+91 11 4000 1000'}
-                </a>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ========================================================================= */}
       {/* TAB 8: AI HEALTH ASSISTANT (BILINGUAL HINDI / HINGLISH) */}
@@ -2480,39 +2817,97 @@ export function PatientPortal({ session, liveVitals, emergency }) {
       )}
 
       {/* ========================================================================= */}
-      {/* MODAL 5: EMERGENCY SOS CONFIRMATION */}
+      {/* MODAL 5: EMERGENCY SOS ACCIDENTAL-TRIGGER PROTECTION & CONFIRMATION */}
       {/* ========================================================================= */}
       {showSosConfirmModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4">
-          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200 border-2 border-red-500">
-            <div className="flex items-center gap-3 text-red-600">
-              <div className="h-12 w-12 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center shrink-0">
-                <Siren className="h-6 w-6 animate-pulse" />
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-2xl space-y-5 animate-in fade-in zoom-in-95 duration-200 border-2 border-red-500">
+            {/* Header with animated pulse and countdown ring */}
+            <div className="flex items-center justify-between border-b border-red-100 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="relative flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-red-600">
+                  <Siren className="h-7 w-7 animate-pulse text-red-600" />
+                  <span className="absolute -top-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-red-600 text-white font-mono text-xs font-black shadow-md">
+                    {sosCountdown}
+                  </span>
+                </div>
+                <div>
+                  <h3 className="text-lg font-black text-slate-900">Emergency SOS Broadcast</h3>
+                  <p className="text-xs font-bold text-red-600">Accidental-Trigger Protection Active</p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-extrabold text-slate-900">Broadcast Emergency SOS?</h3>
-                <p className="text-xs text-red-600 font-semibold">Immediate Dispatch Protocol</p>
+              <button
+                onClick={() => setShowSosConfirmModal(false)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Countdown Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs font-semibold text-slate-600">
+                <span>Auto-dispatching in:</span>
+                <span className="font-mono text-sm font-extrabold text-red-600">{sosCountdown} seconds</span>
+              </div>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                <div
+                  className="h-full bg-gradient-to-r from-red-500 to-rose-600 transition-all duration-1000 ease-linear"
+                  style={{ width: `${(sosCountdown / 5) * 100}%` }}
+                />
+              </div>
+            </div>
+
+            {/* Event Summary Details */}
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3.5 space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Patient:</span>
+                <span className="font-bold text-slate-900">{patient.name || patientName} ({patientId})</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Target Hospital:</span>
+                <span className="font-bold text-slate-900">{hospital.name || 'Assigned Hospital Trauma Unit'}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">GPS Telemetry:</span>
+                <span className="font-mono font-bold text-slate-800">
+                  {currentGps
+                    ? `${currentGps.latitude}, ${currentGps.longitude} (±${currentGps.accuracy}m)`
+                    : 'Acquiring GPS / Fallback location'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500">Emergency Contact:</span>
+                <span className="font-semibold text-slate-800">
+                  {patient.emergencyContact || 'Designated caregiver'} ({patient.emergencyPhone || '+91 98765 43210'})
+                </span>
               </div>
             </div>
 
             <p className="text-xs text-slate-600 leading-relaxed">
-              This will broadcast an urgent emergency alert containing your current location (
-              {currentGps ? `${currentGps.latitude}, ${currentGps.longitude}` : 'Live GPS'}) to the hospital emergency
-              room and your designated caregiver.
+              If you triggered this by mistake, click <strong>Cancel (Abort Trigger)</strong>. Otherwise, click <strong>CONFIRM & DISPATCH NOW</strong> or wait for the countdown to expire.
             </p>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            {/* Action Buttons */}
+            <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-2 border-t border-slate-100">
               <button
-                onClick={() => setShowSosConfirmModal(false)}
-                className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                type="button"
+                onClick={() => {
+                  setShowSosConfirmModal(false);
+                  toast('SOS broadcast cancelled.');
+                }}
+                className="w-full sm:w-auto rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 shadow-xs"
               >
-                Cancel
+                Cancel (Abort Trigger)
               </button>
               <button
+                type="button"
                 onClick={handleTriggerSos}
-                className="rounded-xl bg-red-600 px-6 py-2.5 text-xs font-extrabold text-white hover:bg-red-700 shadow-lg shadow-red-600/30 animate-pulse"
+                disabled={sosTriggering}
+                className="w-full sm:w-auto rounded-xl bg-gradient-to-r from-red-600 via-rose-600 to-red-700 px-6 py-2.5 text-xs font-extrabold text-white hover:from-red-500 hover:to-rose-500 shadow-lg shadow-red-600/30 active:scale-95 transition flex items-center justify-center gap-2"
               >
-                CONFIRM EMERGENCY SOS
+                <AlertOctagon className="h-4 w-4" />
+                {sosTriggering ? 'DISPATCHING...' : 'CONFIRM & DISPATCH NOW'}
               </button>
             </div>
           </div>

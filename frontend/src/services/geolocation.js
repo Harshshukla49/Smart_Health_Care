@@ -159,3 +159,15 @@ export const calculateDistanceKm = (lat1, lon1, lat2, lon2) => {
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return Number((R * c).toFixed(2));
 };
+
+/**
+ * Generate Google Maps, OpenStreetMap, and geo: URI links
+ */
+export const generateMapLinks = (latitude, longitude) => {
+  if (!latitude || !longitude) return { googleMaps: '', openStreetMap: '', geoUri: '' };
+  return {
+    googleMaps: `https://maps.google.com/?q=${latitude},${longitude}`,
+    openStreetMap: `https://www.openstreetmap.org/?mlat=${latitude}&mlon=${longitude}#map=16/${latitude}/${longitude}`,
+    geoUri: `geo:${latitude},${longitude}`,
+  };
+};

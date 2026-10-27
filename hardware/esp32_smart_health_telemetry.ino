@@ -128,11 +128,21 @@ struct VitalsTelemetry {
     int ecg;
     bool leadsOff;
     bool fingerDetected;
+    unsigned long sequenceNumber;
+    bool isBuffered;
     char timestamp[32];
 };
 
-VitalsTelemetry currentVitals = { 0.0, 0.0, 0.0, 0, true, false, "" };
+VitalsTelemetry currentVitals = { 0.0, 0.0, 0.0, 0, true, false, 0, false, "" };
 SemaphoreHandle_t vitalsMutex = NULL;
+
+// Offline FIFO Buffer for Intermittent Internet Disconnection
+#define OFFLINE_BUFFER_CAPACITY 30
+VitalsTelemetry offlineQueue[OFFLINE_BUFFER_CAPACITY];
+int offlineQueueHead = 0;
+int offlineQueueTail = 0;
+int offlineQueueCount = 0;
+unsigned long globalSequenceCounter = 0;
 
 // Heart rate averaging buffer
 const byte RATE_SIZE = 4;
@@ -549,7 +559,23 @@ void readECG() {
 
 bool sendTelemetryPacket(const VitalsTelemetry& data) {
     if (WiFi.status() != WL_CONNECTED) {
-        Serial.println("[TELEMETRY] Cannot send: Wi-Fi disconnected.");
+        Serial.println("[TELEMETRY] Wi-Fi down. Buffering reading into offline queue...");
+        if (offlineQueueCount < OFFLINE_BUFFER_CAPACITY) {
+            VitalsTelemetry buffered = data;
+            buffered.isBuffered = true;
+            offlineQueue[offlineQueueTail] = buffered;
+            offlineQueueTail = (offlineQueueTail + 1) % OFFLINE_BUFFER_CAPACITY;
+            offlineQueueCount++;
+            Serial.printf("[OFFLINE BUFFER] Stored packet #%lu (Queue depth: %d/%d)\n",
+                          buffered.sequenceNumber, offlineQueueCount, OFFLINE_BUFFER_CAPACITY);
+        } else {
+            Serial.println("[OFFLINE BUFFER] Buffer full. Overwriting oldest packet.");
+            offlineQueueHead = (offlineQueueHead + 1) % OFFLINE_BUFFER_CAPACITY;
+            VitalsTelemetry buffered = data;
+            buffered.isBuffered = true;
+            offlineQueue[offlineQueueTail] = buffered;
+            offlineQueueTail = (offlineQueueTail + 1) % OFFLINE_BUFFER_CAPACITY;
+        }
         return false;
     }
 
@@ -563,15 +589,20 @@ bool sendTelemetryPacket(const VitalsTelemetry& data) {
     http.addHeader("X-Device-Token", DEVICE_TOKEN);
     http.setTimeout(4000);
 
-    StaticJsonDocument<384> doc;
-    doc["heartRate"]      = round(data.heartRate * 10.0) / 10.0;
-    doc["spo2"]           = round(data.spo2 * 10.0) / 10.0;
-    doc["temperature"]    = round(data.temperature * 10.0) / 10.0;
-    doc["ecg"]            = data.ecg;
-    doc["leadsOff"]       = data.leadsOff;
-    doc["fingerDetected"] = data.fingerDetected;
-    doc["timestamp"]      = data.timestamp;
-    doc["firmwareVersion"]= FIRMWARE_VERSION;
+    StaticJsonDocument<512> doc;
+    doc["heartRate"]        = round(data.heartRate * 10.0) / 10.0;
+    doc["spo2"]             = round(data.spo2 * 10.0) / 10.0;
+    doc["temperature"]      = round(data.temperature * 10.0) / 10.0;
+    doc["unit"]             = "C";
+    doc["ecg"]              = data.ecg;
+    doc["leadsOff"]         = data.leadsOff;
+    doc["fingerDetected"]   = data.fingerDetected;
+    doc["timestamp"]        = data.timestamp;
+    doc["sequenceNumber"]   = data.sequenceNumber;
+    doc["isReconnect"]      = data.isBuffered;
+    doc["source"]           = "HARDWARE_DEVICE";
+    doc["sensorTier"]       = "PROTOTYPE_INVESTIGATIONAL";
+    doc["firmwareVersion"]  = FIRMWARE_VERSION;
 
     String requestBody;
     serializeJson(doc, requestBody);
@@ -579,8 +610,9 @@ bool sendTelemetryPacket(const VitalsTelemetry& data) {
     int httpCode = http.POST(requestBody);
 
     if (httpCode == 200 || httpCode == 201) {
-        Serial.printf("[TELEMETRY] Sent OK: HR=%.1f SpO2=%.1f Temp=%.1f ECG=%d | LeadsOff=%d\n",
-                      data.heartRate, data.spo2, data.temperature, data.ecg, data.leadsOff);
+        Serial.printf("[TELEMETRY] Sent OK: Seq=%lu HR=%.1f SpO2=%.1f Temp=%.1f ECG=%d | LeadsOff=%d%s\n",
+                      data.sequenceNumber, data.heartRate, data.spo2, data.temperature, data.ecg, data.leadsOff,
+                      data.isBuffered ? " [BUFFER_FLUSH]" : "");
         authFailureCount = 0;
         http.end();
         return true;
@@ -644,6 +676,19 @@ void cloudTask(void* parameter) {
             synchronizeTime();
         }
 
+        // Flush offline queue when reconnected before sending live readings
+        while (offlineQueueCount > 0 && WiFi.status() == WL_CONNECTED) {
+            VitalsTelemetry queuedItem = offlineQueue[offlineQueueHead];
+            Serial.printf("[OFFLINE FLUSH] Transmitting buffered packet #%lu...\n", queuedItem.sequenceNumber);
+            if (sendTelemetryPacket(queuedItem)) {
+                offlineQueueHead = (offlineQueueHead + 1) % OFFLINE_BUFFER_CAPACITY;
+                offlineQueueCount--;
+                vTaskDelay(pdMS_TO_TICKS(150)); // Respect server 10 req/s rate limit
+            } else {
+                break; // Stop flushing if transmission failed
+            }
+        }
+
         // Send telemetry packet at defined interval
         if (millis() - lastTelemetryUpload >= TELEMETRY_INTERVAL_MS) {
             lastTelemetryUpload = millis();
@@ -652,6 +697,8 @@ void cloudTask(void* parameter) {
             if (xSemaphoreTake(vitalsMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                 snapshot = currentVitals;
                 getFormattedTimestamp(snapshot.timestamp, sizeof(snapshot.timestamp));
+                snapshot.sequenceNumber = ++globalSequenceCounter;
+                snapshot.isBuffered = false;
                 xSemaphoreGive(vitalsMutex);
 
                 sendTelemetryPacket(snapshot);

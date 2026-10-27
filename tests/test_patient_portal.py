@@ -358,3 +358,56 @@ def test_change_account_password(client):
         "confirmPassword": "NewStrongPass999!",
     }, headers=headers)
     assert resp_correct.status_code == 200
+
+
+# ==============================================================================
+# PRIVACY & DATA ISOLATION REGRESSION TESTS
+# ==============================================================================
+
+def test_patient_to_patient_vitals_isolation(client):
+    """Verifies Patient 1 cannot inject vitals into Patient 2's medical record."""
+    headers_pat1 = _auth_header("patient", id="PAT-001", patientId="PAT-001", email="aarav.sharma@example.com")
+    resp = client.post("/api/patient/PAT-002/manual-vitals", json={
+        "heartRate": 75,
+        "spo2": 98,
+        "temperature": 37.0,
+    }, headers=headers_pat1)
+    assert resp.status_code == 403
+    assert resp.get_json()["status"] == "error"
+
+
+def test_patient_to_patient_medicines_isolation(client):
+    """Verifies Patient 1 cannot access or view Patient 2's prescriptions/medications."""
+    headers_pat1 = _auth_header("patient", id="PAT-001", patientId="PAT-001", email="aarav.sharma@example.com")
+    resp = client.get("/api/patient/PAT-002/medicines", headers=headers_pat1)
+    assert resp.status_code == 403
+    assert resp.get_json()["status"] == "error"
+
+
+def test_patient_to_patient_profile_update_blocked(client):
+    """Verifies Patient 1 cannot tamper with or modify Patient 2's profile or emergency contacts."""
+    headers_pat1 = _auth_header("patient", id="PAT-001", patientId="PAT-001", email="aarav.sharma@example.com")
+    resp = client.put("/api/patient/PAT-002/profile", json={
+        "emergencyContact": "Attacker (Malicious)",
+        "emergencyPhone": "+919999900000",
+        "allergies": "Malicious Tampering",
+    }, headers=headers_pat1)
+    assert resp.status_code == 403
+    assert resp.get_json()["status"] == "error"
+
+
+def test_unassigned_doctor_cannot_view_patient_medical_history(client):
+    """Verifies unassigned doctor cannot access patient longitudinal medical history."""
+    headers_unassigned_doc = _auth_header("doctor", email="dr.unassigned@example.com", doctorId="DOC-UNASSIGNED")
+    resp = client.get("/api/patient/PAT-001/history", headers=headers_unassigned_doc)
+    assert resp.status_code == 403
+    assert resp.get_json()["status"] == "error"
+
+
+def test_patient_medical_report_privacy_isolation(client):
+    """Verifies Patient 2 cannot access Patient 1's aggregated medical report."""
+    headers_pat2 = _auth_header("patient", id="PAT-002", patientId="PAT-002", email="priya.patel@example.com")
+    resp = client.get("/api/patient/PAT-001/medical-report", headers=headers_pat2)
+    assert resp.status_code == 403
+    assert resp.get_json()["status"] == "error"
+

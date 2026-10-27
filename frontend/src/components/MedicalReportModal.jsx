@@ -50,23 +50,21 @@ export function MedicalReportModal({
       const generated = generateRealisticLabResults(patient);
       setLabTests(generated);
 
-      // Load previous local reports history
+      // Maintain in-memory report history for the current viewing session to prevent persistent unencrypted disk storage
+      const initialRecord = {
+        reportId: `RPT-${new Date().getFullYear()}-${String(patient.id || 'PAT').slice(-4).toUpperCase()}-1042`,
+        timestamp: new Date().toLocaleString(),
+        type: 'FINAL_CERTIFIED',
+        doctorName: doctor?.name || patient?.assignedDoctorName || 'Dr. Sourav Tripathi',
+        status: 'Verified',
+      };
+      setReportHistory([initialRecord]);
+
+      // Purge any legacy unencrypted reports history from localStorage
       try {
         const histKey = `medical_reports_hist:${patient.id || patient.patientId || 'default'}`;
-        const stored = localStorage.getItem(histKey);
-        if (stored) {
-          setReportHistory(JSON.parse(stored));
-        } else {
-          // Initialize with current session entry
-          const initialRecord = {
-            reportId: `RPT-${new Date().getFullYear()}-${String(patient.id || 'PAT').slice(-4).toUpperCase()}-1042`,
-            timestamp: new Date().toLocaleString(),
-            type: 'FINAL_CERTIFIED',
-            doctorName: doctor?.name || patient?.assignedDoctorName || 'Dr. Sourav Tripathi',
-            status: 'Verified',
-          };
-          setReportHistory([initialRecord]);
-          localStorage.setItem(histKey, JSON.stringify([initialRecord]));
+        if (localStorage.getItem(histKey)) {
+          localStorage.removeItem(histKey);
         }
       } catch {
         // silent
@@ -146,11 +144,6 @@ export function MedicalReportModal({
       };
       const updatedHist = [newEntry, ...reportHistory.slice(0, 9)];
       setReportHistory(updatedHist);
-      try {
-        localStorage.setItem(`medical_reports_hist:${patientId}`, JSON.stringify(updatedHist));
-      } catch {
-        // silent
-      }
     } catch (err) {
       toast.error(`Failed to generate PDF: ${err.message}`, { id: toastId });
     } finally {

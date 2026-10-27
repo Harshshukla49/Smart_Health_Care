@@ -154,33 +154,60 @@ const deriveStatus = ({ heartRate, spo2, temperature, status, prediction }) => {
   return 'Normal';
 };
 
-const readLocalPatients = () => {
-  if (!hasWindow) {
-    return [];
-  }
+let inMemoryPatientsCache = {};
 
-  try {
-    const source = window.localStorage.getItem(getPatientStorageKey());
-    if (!source) {
-      return [];
+export const clearPatientsCache = () => {
+  inMemoryPatientsCache = {};
+  if (typeof window !== 'undefined') {
+    try {
+      if (window.sessionStorage) {
+        window.sessionStorage.clear();
+      }
+      if (window.localStorage) {
+        const keysToRemove = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+          const k = window.localStorage.key(i);
+          if (k && k.startsWith(PATIENT_STORAGE_KEY)) {
+            keysToRemove.push(k);
+          }
+        }
+        keysToRemove.forEach((k) => window.localStorage.removeItem(k));
+      }
+    } catch {
+      // Ignore
     }
-
-    const parsed = JSON.parse(source);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
   }
 };
 
-const writeLocalPatients = (patients) => {
-  if (!hasWindow) {
-    return;
-  }
+if (typeof window !== 'undefined') {
+  window.__clearPatientsCache = clearPatientsCache;
+}
 
-  try {
-    window.localStorage.setItem(getPatientStorageKey(), JSON.stringify(patients));
-  } catch {
-    // Ignore storage errors in restricted browsers.
+const readLocalPatients = () => {
+  const key = getPatientStorageKey();
+  if (inMemoryPatientsCache[key] && Array.isArray(inMemoryPatientsCache[key])) {
+    return inMemoryPatientsCache[key];
+  }
+  return [];
+};
+
+const writeLocalPatients = (patients) => {
+  const key = getPatientStorageKey();
+  const safeList = Array.isArray(patients) ? patients : [];
+  inMemoryPatientsCache[key] = safeList;
+
+  // Purge any legacy browser storage to prevent unencrypted clinical data persistence
+  if (hasWindow) {
+    try {
+      if (window.sessionStorage && window.sessionStorage.getItem(key)) {
+        window.sessionStorage.removeItem(key);
+      }
+      if (window.localStorage && window.localStorage.getItem(key)) {
+        window.localStorage.removeItem(key);
+      }
+    } catch {
+      // Ignore storage errors in restricted browsers.
+    }
   }
 };
 
@@ -831,46 +858,29 @@ export const triggerSosAlert = async ({ patientId, heartRate, spo2, temperature,
 // ===================== EMERGENCY & AMBULANCE API =====================
 
 export const postEmergencyTriggerApi = async (alertPayload) => {
-  try {
-    const response = await api.post('/api/emergency/trigger', alertPayload);
-    return unwrapEnvelope(response);
-  } catch {
-    // Also dispatch to SOS service with live location link
-    try {
-      if (alertPayload?.patientId) {
-        const coords = alertPayload.location;
-        const locLink = coords ? `https://maps.google.com/?q=${coords.latitude},${coords.longitude}` : '';
-        await triggerSosAlert({
-          patientId: alertPayload.patientId,
-          heartRate: alertPayload.vitals?.heartRate,
-          spo2: alertPayload.vitals?.spo2,
-          temperature: alertPayload.vitals?.temperature,
-          locationLink: locLink,
-        });
-      }
-    } catch {
-      // silent fallback
-    }
-    return { status: 'triggered', alert: alertPayload };
-  }
+  const response = await api.post('/api/emergency/trigger', alertPayload);
+  return unwrapEnvelope(response);
 };
 
 export const getActiveEmergenciesApi = async () => {
-  try {
-    const response = await api.get('/api/emergency/active');
-    return unwrapEnvelope(response);
-  } catch {
-    return { emergencies: [] };
-  }
+  const response = await api.get('/api/emergency/active');
+  return unwrapEnvelope(response);
 };
 
-export const postEmergencyStatusApi = async (alertId, status) => {
-  try {
-    const response = await api.post(`/api/emergency/${encodeURIComponent(toText(alertId))}/status`, { status });
-    return unwrapEnvelope(response);
-  } catch {
-    return { status };
-  }
+export const fetchEmergencyAlert = async (alertId) => {
+  const response = await api.get(`/api/emergency/${encodeURIComponent(toText(alertId))}`);
+  return unwrapEnvelope(response);
+};
+
+export const postEmergencyStatusApi = async (alertId, payload) => {
+  const body = typeof payload === 'object' ? payload : { status: payload };
+  const response = await api.post(`/api/emergency/${encodeURIComponent(toText(alertId))}/status`, body);
+  return unwrapEnvelope(response);
+};
+
+export const fetchEmergencyAudit = async (alertId) => {
+  const response = await api.get(`/api/emergency/${encodeURIComponent(toText(alertId))}/audit`);
+  return unwrapEnvelope(response);
 };
 
 export const postAmbulanceRequestApi = async (requestPayload) => {
@@ -1186,6 +1196,91 @@ export const changeAccountPassword = async (payload) => {
   const response = await api.post('/api/auth/change-password', payload);
   return unwrapEnvelope(response);
 };
+
+/**
+ * =========================================================================
+ * MULTI-HOSPITAL DOCTOR CLINICAL COMMAND CENTER API METHODS
+ * =========================================================================
+ */
+
+/**
+ * Fetch doctor overview metrics, assigned patients, today's appointments, alerts
+ */
+export const fetchDoctorOverview = async () => {
+  const response = await api.get('/api/doctor/overview');
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch permitted hospital-wide patient directory (Access Level A)
+ */
+export const fetchDoctorHospitalDirectory = async (params = {}) => {
+  const response = await api.get('/api/doctor/hospital-directory', { params });
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch detailed clinical dossier for assigned patient (Access Level B)
+ */
+export const fetchDoctorPatientClinicalRecord = async (patientId) => {
+  const response = await api.get(`/api/doctor/patient/${encodeURIComponent(toText(patientId))}/clinical-record`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Request emergency break-glass clinical access for unassigned patient in same hospital
+ */
+export const requestDoctorEmergencyAccess = async (patientId, payload) => {
+  const response = await api.post(`/api/doctor/patient/${encodeURIComponent(toText(patientId))}/emergency-access`, payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch assigned doctor alerts and critical telemetry triage queue
+ */
+export const fetchDoctorAlerts = async () => {
+  const response = await api.get('/api/doctor/alerts');
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Triage doctor emergency alert (Acknowledge, Take Action, Resolve)
+ */
+export const triageDoctorAlert = async (alertId, payload) => {
+  const response = await api.post(`/api/doctor/alerts/${encodeURIComponent(toText(alertId))}/triage`, payload);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Fetch certified printable clinical consultation summary & Rx document
+ */
+export const fetchDoctorPatientClinicalDocument = async (patientId) => {
+  const response = await api.get(`/api/doctor/patient/${encodeURIComponent(toText(patientId))}/clinical-document`);
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Record a finalized consultation with diagnosis and treatment
+ */
+export const recordDoctorConsultation = async (doctorId, patientId, payload) => {
+  const response = await api.post(
+    `/api/doctor/${encodeURIComponent(toText(doctorId))}/patient/${encodeURIComponent(toText(patientId))}/consultations`,
+    payload
+  );
+  return unwrapEnvelope(response);
+};
+
+/**
+ * Update prescription with auditable correction tracking
+ */
+export const updateDoctorPrescriptionWithAudit = async (patientId, medicationId, payload) => {
+  const response = await api.put(
+    `/api/patient/${encodeURIComponent(toText(patientId))}/prescriptions/${encodeURIComponent(toText(medicationId))}`,
+    payload
+  );
+  return unwrapEnvelope(response);
+};
+
 
 
 

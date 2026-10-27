@@ -11,6 +11,14 @@ services:
         value: 5000
       - key: PYTHON_VERSION
         value: 3.11.11
+      - key: APP_AUTH_SECRET
+        generateValue: true
+      - key: CORS_ORIGIN
+        value: https://smart-health-rontend.onrender.com,https://smart-health-frontend.onrender.com
+      - key: SENSOR_ADAPTER
+        value: simulated
+      - key: ALLOW_DEV_DEVICE_INSECURE
+        value: "false"
 
   - type: web
     name: smart-health-frontend

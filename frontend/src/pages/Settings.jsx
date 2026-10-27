@@ -229,10 +229,12 @@ export function Settings() {
     emergency.setLocationSharingEnabled(locShare);
     emergency.setEmergencyLocationSharingEnabled(emergLocShare);
 
-    localStorage.setItem('patient_sos_contacts', JSON.stringify(cleanedContacts));
-    localStorage.setItem('patient_sos_contact', JSON.stringify(primary));
-    localStorage.setItem('location_sharing_pref', String(locShare));
-    localStorage.setItem('emergency_location_pref', String(emergLocShare));
+    try {
+      localStorage.removeItem('patient_sos_contacts');
+      localStorage.removeItem('patient_sos_contact');
+      localStorage.setItem('location_sharing_pref', String(locShare));
+      localStorage.setItem('emergency_location_pref', String(emergLocShare));
+    } catch {}
 
     // If patient session is active, sync with backend database
     if (!isDoctor && session?.patientId) {

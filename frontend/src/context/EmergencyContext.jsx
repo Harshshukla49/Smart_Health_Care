@@ -83,44 +83,33 @@ export function EmergencyProvider({ children, vitalsContext }) {
         setThresholds({ ...DEFAULT_CRITICAL_SETTINGS, ...JSON.parse(savedSettings) });
       }
 
-      // Check multi-contact storage
-      const savedMultiSos = localStorage.getItem('patient_sos_contacts');
-      if (savedMultiSos) {
-        const parsed = JSON.parse(savedMultiSos);
-        if (Array.isArray(parsed)) {
-          const cleaned = parsed
-            .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && (c.name || c.phone))
-            .slice(0, 3);
-          if (cleaned.length > 0) {
-            setSosContacts(cleaned);
-          }
+      // Purge any legacy unauthenticated SOS contacts from localStorage to protect patient contact privacy
+      try {
+        if (localStorage.getItem('patient_sos_contacts')) {
+          localStorage.removeItem('patient_sos_contacts');
         }
-      } else {
-        const savedSos = localStorage.getItem('patient_sos_contact');
-        if (savedSos) {
-          const parsed = JSON.parse(savedSos);
-          if (parsed?.name === 'Rahul Soni' || parsed?.phone === '+91 98765 43210') {
-            localStorage.removeItem('patient_sos_contact');
-          } else if (parsed && (parsed.name || parsed.phone)) {
-            setSosContacts([parsed]);
-          }
-        } else if (session?.sosContacts && Array.isArray(session.sosContacts)) {
-          const cleaned = session.sosContacts
-            .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && (c.name || c.phone))
-            .slice(0, 3);
-          if (cleaned.length > 0) {
-            setSosContacts(cleaned);
-          }
-        } else if (session?.sosContactName || session?.sosContactPhone) {
-          if (session.sosContactName !== 'Rahul Soni' && session.sosContactPhone !== '+91 98765 43210') {
-            setSosContacts([
-              {
-                name: session.sosContactName || '',
-                phone: session.sosContactPhone || '',
-                relation: session.sosContactRelation || 'Family',
-              },
-            ]);
-          }
+        if (localStorage.getItem('patient_sos_contact')) {
+          localStorage.removeItem('patient_sos_contact');
+        }
+      } catch {}
+
+      // Load SOS contacts strictly from authenticated patient session
+      if (session?.sosContacts && Array.isArray(session.sosContacts)) {
+        const cleaned = session.sosContacts
+          .filter((c) => c && c.name !== 'Rahul Soni' && c.phone !== '+91 98765 43210' && (c.name || c.phone))
+          .slice(0, 3);
+        if (cleaned.length > 0) {
+          setSosContacts(cleaned);
+        }
+      } else if (session?.sosContactName || session?.sosContactPhone) {
+        if (session.sosContactName !== 'Rahul Soni' && session.sosContactPhone !== '+91 98765 43210') {
+          setSosContacts([
+            {
+              name: session.sosContactName || '',
+              phone: session.sosContactPhone || '',
+              relation: session.sosContactRelation || 'Family',
+            },
+          ]);
         }
       }
 
@@ -278,12 +267,19 @@ export function EmergencyProvider({ children, vitalsContext }) {
 
   // Trigger Emergency Workflow
   const triggerEmergency = useCallback(
-    async ({ reason, isDemo = false, vitalsSnapshot = null }) => {
+    async ({
+      reason,
+      isDemo = false,
+      vitalsSnapshot = null,
+      location: customCoords = null,
+      patientId: customPatientId = null,
+      patientName: customPatientName = null,
+    } = {}) => {
       setEmergencyState('CRITICAL');
       setEmergencyModalOpen(true);
       setIsDemoMode(isDemo);
 
-      let currentCoords = location;
+      let currentCoords = customCoords || location;
       if (!currentCoords && isGeolocationSupported()) {
         try {
           currentCoords = await getCurrentCoordinates({ timeout: 4000 });
@@ -313,10 +309,13 @@ export function EmergencyProvider({ children, vitalsContext }) {
         risk_score: 0.94,
       };
 
+      const finalPatientId = customPatientId || patientId;
+      const finalPatientName = customPatientName || patientName;
+
       const alertPayload = {
         alertId: `emg-${Date.now().toString(36)}`,
-        patientId,
-        patientName,
+        patientId: finalPatientId,
+        patientName: finalPatientName,
         status: 'CRITICAL',
         triggerReason: reason || 'Critical telemetry threshold breach',
         vitals: {
@@ -359,8 +358,14 @@ export function EmergencyProvider({ children, vitalsContext }) {
       setActiveEmergency(alertPayload);
 
       try {
-        await postEmergencyTriggerApi(alertPayload);
-      } catch {
+        const response = await postEmergencyTriggerApi(alertPayload);
+        if (response && response.data) {
+          setActiveEmergency(response.data);
+          if (response.duplicatePrevented) {
+            toast('SOS already active — GPS coordinates and vitals refreshed.', { icon: 'ℹ️' });
+          }
+        }
+      } catch (err) {
         // demo/offline fallback
       }
 
@@ -375,7 +380,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
         },
       });
     },
-    [location, vitalsContext, patientId, patientName, sosContact, session?.doctorId]
+    [location, vitalsContext, patientId, patientName, sosContact, sosContacts, session?.doctorId]
   );
 
   // Request Ambulance
@@ -464,15 +469,33 @@ export function EmergencyProvider({ children, vitalsContext }) {
     }
   }, []);
 
-  // Resolve Emergency
-  const resolveEmergency = useCallback(async (alertId) => {
+  // Cancel Emergency (Patient accidental cancellation or recall)
+  const cancelEmergency = useCallback(async (alertId, reason = 'Cancelled by user') => {
     try {
-      await postEmergencyStatusApi(alertId, 'RESOLVED');
+      await postEmergencyStatusApi(alertId, { status: 'CANCELLED', notes: reason });
+    } catch (err) {
+      console.warn('Failed to post emergency cancellation to backend:', err);
+    }
+    setEmergencyState('NORMAL');
+    setEmergencyModalOpen(false);
+    setAmbulanceModalOpen(false);
+    setActiveEmergency(null);
+    autoTriggeredRef.current = false;
+    setAmbulanceRequested(false);
+    setDoctorActiveEmergencies((list) => list.filter((item) => item.alertId !== alertId));
+    toast.success('Emergency distress alert cancelled.');
+  }, []);
+
+  // Resolve Emergency
+  const resolveEmergency = useCallback(async (alertId, notes = '') => {
+    try {
+      await postEmergencyStatusApi(alertId, { status: 'RESOLVED', notes });
     } catch {
       // fallback
     }
     setEmergencyState('RESOLVED');
     setEmergencyModalOpen(false);
+    setAmbulanceModalOpen(false);
     setActiveEmergency(null);
     autoTriggeredRef.current = false;
     setAmbulanceRequested(false);
@@ -529,6 +552,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
       confirmLocationConsent,
       refreshLocation: fetchLocationSilently,
       triggerEmergency,
+      cancelEmergency,
       requestAmbulance,
       acknowledgeEmergency,
       resolveEmergency,
@@ -559,6 +583,7 @@ export function EmergencyProvider({ children, vitalsContext }) {
       confirmLocationConsent,
       fetchLocationSilently,
       triggerEmergency,
+      cancelEmergency,
       requestAmbulance,
       acknowledgeEmergency,
       resolveEmergency,
@@ -601,6 +626,7 @@ export function useEmergency() {
       requestLocationPermission: () => {},
       fetchLocationSilently: () => {},
       triggerEmergency: () => {},
+      cancelEmergency: () => {},
       requestAmbulance: () => {},
       acknowledgeEmergency: () => {},
       resolveEmergency: () => {},

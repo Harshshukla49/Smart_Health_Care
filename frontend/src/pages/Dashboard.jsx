@@ -74,6 +74,7 @@ import { AiHealthAssessment } from '../components/AiHealthAssessment';
 import { MedicationManagement } from '../components/MedicationManagement';
 import { AdminControlCenter } from '../components/AdminControlCenter';
 import { PatientPortal } from '../components/patient/PatientPortal';
+import { DoctorCommandCenter } from '../components/doctor/DoctorCommandCenter';
 
 export function Dashboard() {
   return (
@@ -589,6 +590,27 @@ function DashboardBody({ liveVitals }) {
         onSectionSelect={() => {}}
       >
         <PatientPortal session={session} liveVitals={liveVitals} emergency={emergency} />
+      </DashboardLayout>
+    );
+  }
+
+  if (role === 'doctor') {
+    return (
+      <DashboardLayout
+        role={role}
+        title="Doctor Clinical Command Center"
+        subtitle="Hospital Patient Registry, Clinical Dossiers & Telemetry Monitoring"
+        backLabel={t('common.backToHome')}
+        activeSection={activeSection}
+        onSectionSelect={(sec) => setActiveSection(sec)}
+      >
+        <DoctorCommandCenter
+          session={session}
+          liveVitals={liveVitals}
+          emergency={emergency}
+          activeTab={activeSection}
+          onTabChange={(tab) => setActiveSection(tab)}
+        />
       </DashboardLayout>
     );
   }

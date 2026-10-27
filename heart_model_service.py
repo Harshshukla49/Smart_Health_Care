@@ -242,6 +242,9 @@ def predict_heart_disease(data: Any) -> dict[str, Any]:
             "confidence": confidence,
             "message": message,
             "features": features,
+            "isClinicalDiagnosis": False,
+            "regulatoryClassification": "Investigational Clinical Decision Support Tool",
+            "regulatoryNotice": "This algorithmic risk score is advisory only and must not replace professional clinical assessment or primary medical diagnosis.",
         }
     except Exception:
         LOGGER.error("Heart model prediction failed:\n%s", traceback.format_exc())

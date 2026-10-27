@@ -77,23 +77,14 @@ function getNavigationSections(role, t) {
   // DOCTOR SCOPED NAVIGATION:
   return [
     {
-      title: tr('layout.nav.clinicalCommand', 'CLINICAL COMMAND'),
+      title: 'CLINICAL COMMAND',
       items: [
-        { id: 'overview', label: tr('layout.nav.wardOverview', 'Ward Overview'), to: '/dashboard', icon: LayoutDashboard },
-        { id: 'vitals', label: tr('layout.nav.liveMonitoring', 'Live Monitoring'), to: '/dashboard#vitals', icon: Activity },
-        { id: 'patients', label: tr('layout.nav.patientsRoster', 'Patients Roster'), to: '/dashboard#patients', icon: UsersRound },
-        { id: 'medications', label: tr('layout.nav.prescriptionsMeds', 'Prescriptions & Meds'), to: '/dashboard#medications', icon: Pill },
+        { id: 'overview', label: 'Doctor Overview', to: '/dashboard#overview', icon: LayoutDashboard },
+        { id: 'directory', label: 'Hospital Directory (A)', to: '/dashboard#directory', icon: UsersRound },
+        { id: 'assigned', label: 'My Assigned Patients (B)', to: '/dashboard#assigned', icon: Stethoscope },
+        { id: 'consultations', label: 'Consultations Queue', to: '/dashboard#consultations', icon: FileText },
+        { id: 'alerts', label: 'Telemetry & SOS Alerts', to: '/dashboard#alerts', icon: BellRing },
         { id: 'add-patient', label: tr('layout.nav.addPatient', 'Add Patient'), to: '/add-patient', icon: PlusCircle },
-      ],
-    },
-    {
-      title: tr('layout.nav.diagnosticsTriage', 'DIAGNOSTICS & TRIAGE'),
-      items: [
-        { id: 'ai-assessment', label: tr('layout.nav.aiAssessmentTriage', 'AI Assessment & First Aid'), to: '/dashboard#ai-assessment', icon: BrainCircuit },
-        { id: 'insights', label: tr('layout.nav.riskPredictions', 'Risk Predictions'), to: '/dashboard#insights', icon: ShieldAlert },
-        { id: 'ecg', label: tr('layout.nav.ecgAnalysis', 'ECG Analysis'), to: '/dashboard#ecg', icon: Waves },
-        { id: 'reports', label: tr('layout.nav.clinicalReports', 'Clinical Reports'), to: '/dashboard#reports', icon: FileText },
-        { id: 'alerts', label: tr('layout.nav.emergencyAlerts', 'Emergency Alerts'), to: '/dashboard#alerts', icon: BellRing },
       ],
     },
     {

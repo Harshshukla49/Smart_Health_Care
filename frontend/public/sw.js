@@ -43,6 +43,11 @@ function shouldBypassCache(url, request) {
   // Strict API & Medical Data bypass rules
   if (
     pathname.startsWith('/api/') ||
+    pathname === '/patients' ||
+    pathname.startsWith('/patients') ||
+    pathname.startsWith('/predict') ||
+    pathname.startsWith('/device') ||
+    pathname.startsWith('/telemetry') ||
     pathname.includes('socket.io') ||
     pathname.includes('/chat/') ||
     pathname.includes('/emergency/') ||
@@ -117,7 +122,12 @@ self.addEventListener('fetch', (event) => {
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then((networkResponse) => {
+        .then(async (networkResponse) => {
+          // If the web server returns 404 on a client-side route, fall back to cached SPA index.html app shell
+          if (networkResponse && networkResponse.status === 404) {
+            const appShell = await caches.match('/index.html');
+            if (appShell) return appShell;
+          }
           if (networkResponse && networkResponse.status === 200) {
             const responseClone = networkResponse.clone();
             caches.open(RUNTIME_CACHE).then((cache) => {
