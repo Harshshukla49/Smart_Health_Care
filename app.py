@@ -3402,29 +3402,115 @@ def _consume_reset_token(token, user_type, user_key, email):
     return True, ''
 
 
+def _has_active_super_admin(all_admins=None):
+    if all_admins is None:
+        try:
+            all_admins = _admin_collection_reference().get()
+        except Exception:
+            return False
+    if isinstance(all_admins, dict):
+        for a in all_admins.values():
+            if isinstance(a, dict) and str(a.get('role') or '').strip().lower() == 'super_admin' and a.get('isActive') is not False:
+                return True
+    return False
+
+
 def _ensure_default_super_admin():
+    """
+    Secure One-Time First-Super-Admin Provisioning.
+    
+    Safety Invariants:
+    1. If an active Super Admin already exists in the database, this function terminates immediately.
+       It will NEVER overwrite credentials, change roles, or promote accounts on startup.
+    2. No insecure hardcoded production passwords are ever used.
+       If SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD is missing or matches known insecure defaults,
+       provisioning is skipped with a safe diagnostic log.
+    3. Existing non-super-admin accounts are never silently promoted.
+    4. Passwords must pass strong validation (>= 10 chars) and are hashed with Werkzeug pbkdf2/scrypt.
+    5. Emails and credentials are never printed in plain text to logs.
+    """
     try:
         admin_ref = _admin_collection_reference()
         all_admins = admin_ref.get()
-        if isinstance(all_admins, dict):
-            for a in all_admins.values():
-                if isinstance(a, dict) and a.get('role') == 'super_admin':
-                    return
 
-        default_email = os.getenv('SUPER_ADMIN_EMAIL', 'admin@smarthealth.io').strip().lower()
-        default_password = os.getenv('SUPER_ADMIN_PASSWORD', 'Admin@SmartHealth2026!')
-        admin_id = 'ADMIN-ROOT-001'
-        admin_ref.child(default_email.replace('.', ',')).set({
+        # 1. Guard against repeat provisioning or overwrite
+        if _has_active_super_admin(all_admins):
+            return
+
+        # 2. Read configured first-admin credentials from environment
+        raw_email = (
+            os.getenv('INITIAL_ADMIN_EMAIL') or
+            os.getenv('SUPER_ADMIN_EMAIL') or
+            ''
+        ).strip().lower()
+
+        raw_password = (
+            os.getenv('INITIAL_ADMIN_PASSWORD') or
+            os.getenv('SUPER_ADMIN_PASSWORD') or
+            ''
+        ).strip()
+
+        # 3. Guard against missing credentials (do NOT fallback to hardcoded default passwords!)
+        if not raw_email or not raw_password:
+            print("[Auth] Info: No active Super Admin found. Configure INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD to complete initial setup.")
+            return
+
+        # 4. Guard against known insecure default passwords
+        insecure_defaults = {
+            'admin@smarthealth2026!',
+            'changemeinproduction!2026',
+            'admin',
+            'password',
+            '12345678',
+            'admin123',
+            'smarthealth',
+            'secret',
+        }
+        if raw_password.lower() in insecure_defaults:
+            print("[Auth] Security Warning: SUPER_ADMIN_PASSWORD matches an insecure known default. "
+                  "Initial administrator provisioning skipped. Please configure a unique, strong password.")
+            return
+
+        # 5. Validate email format
+        if not _is_valid_email(raw_email):
+            print("[Auth] Security Warning: SUPER_ADMIN_EMAIL is not a valid email address. "
+                  "Initial administrator provisioning skipped.")
+            return
+
+        # 6. Validate password strength (min 10 characters)
+        if len(raw_password) < 10:
+            print("[Auth] Security Warning: SUPER_ADMIN_PASSWORD must be at least 10 characters long. "
+                  "Initial administrator provisioning skipped.")
+            return
+
+        # 7. Check if an account already exists under this email key
+        sanitized_key = raw_email.replace('.', ',')
+        existing_account = admin_ref.child(sanitized_key).get()
+        if isinstance(existing_account, dict):
+            # Do NOT silently promote or alter an existing account
+            print("[Auth] Security Notice: An account already exists under the configured administrator email. "
+                  "Refusing to overwrite or silently alter existing account.")
+            return
+
+        # 8. Provision root Super Admin
+        admin_id = f"ADMIN-ROOT-{uuid.uuid4().hex[:6].upper()}"
+        admin_name = str(os.getenv('SUPER_ADMIN_NAME') or 'System Super Admin').strip()
+
+        record = {
             'id': admin_id,
             'adminId': admin_id,
-            'email': default_email,
-            'name': 'System Super Admin',
+            'email': raw_email,
+            'name': admin_name,
             'role': 'super_admin',
             'isActive': True,
-            'passwordHash': generate_password_hash(default_password),
+            'passwordHash': generate_password_hash(raw_password),
             'createdAt': datetime.now(timezone.utc).isoformat(),
-        })
-        print(f"[Auth] Initialized default super admin: {default_email}")
+            'provisionMethod': 'one_time_env_bootstrap',
+        }
+
+        admin_ref.child(sanitized_key).set(record)
+        masked = _mask_email(raw_email)
+        print(f"[Auth] Successfully provisioned initial Super Administrator ({masked}).")
     except Exception as e:
         print(f"[Auth] Super admin initialization check: {e}")
 
