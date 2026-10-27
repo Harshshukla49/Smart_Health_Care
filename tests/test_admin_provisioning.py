@@ -298,3 +298,37 @@ def test_unauthorized_access_to_super_admin_endpoint(client):
         json={"name": "Hosp Admin", "email": "admin@hosp.org", "password": "Pass2026!Secure", "hospitalId": "HOSP-01"}
     )
     assert resp.status_code == 403
+
+
+def test_legacy_placeholder_admin_deactivated_when_authentic_admin_provisioned(monkeypatch, db_store):
+    """When the legacy template placeholder admin@smarthealth.io exists, a genuine SUPER_ADMIN_EMAIL provisions and deactivates the placeholder."""
+    # Pre-seed the legacy template placeholder
+    db_store["admins"]["admin@smarthealth,io"] = {
+        "id": "ADMIN-ROOT-001",
+        "email": "admin@smarthealth.io",
+        "name": "System Super Admin",
+        "role": "super_admin",
+        "isActive": True,
+        "passwordHash": generate_password_hash("Admin@SmartHealth2026!"),
+        "createdAt": "2026-01-01T00:00:00Z",
+    }
+
+    # Configure genuine admin
+    monkeypatch.setenv("SUPER_ADMIN_EMAIL", "real.director@healthcenter.org")
+    monkeypatch.setenv("SUPER_ADMIN_PASSWORD", "RealSecurePassword2026!")
+    monkeypatch.setenv("SUPER_ADMIN_NAME", "Real Director")
+
+    backend_app._ensure_default_super_admin()
+
+    admins = db_store["admins"]
+    # 1. Real admin created
+    assert "real,director@healthcenter,org" in admins
+    real_admin = admins["real,director@healthcenter,org"]
+    assert real_admin["role"] == "super_admin"
+    assert real_admin["isActive"] is True
+    assert check_password_hash(real_admin["passwordHash"], "RealSecurePassword2026!")
+
+    # 2. Legacy placeholder safely deactivated
+    legacy_admin = admins["admin@smarthealth,io"]
+    assert legacy_admin["isActive"] is False
+    assert legacy_admin["status"] == "deactivated"

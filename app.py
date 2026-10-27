@@ -3402,7 +3402,10 @@ def _consume_reset_token(token, user_type, user_key, email):
     return True, ''
 
 
-def _has_active_super_admin(all_admins=None):
+LEGACY_UNCONFIGURED_ADMIN_EMAILS = {'admin@smarthealth.io'}
+
+
+def _has_active_super_admin(all_admins=None, allow_legacy_placeholder_replacement=False):
     if all_admins is None:
         try:
             all_admins = _admin_collection_reference().get()
@@ -3410,7 +3413,14 @@ def _has_active_super_admin(all_admins=None):
             return False
     if isinstance(all_admins, dict):
         for a in all_admins.values():
-            if isinstance(a, dict) and str(a.get('role') or '').strip().lower() == 'super_admin' and a.get('isActive') is not False:
+            if not isinstance(a, dict):
+                continue
+            a_role = str(a.get('role') or '').strip().lower()
+            a_email = str(a.get('email') or '').strip().lower()
+            is_active = a.get('isActive') is not False and a.get('status') != 'deactivated'
+            if a_role == 'super_admin' and is_active:
+                if allow_legacy_placeholder_replacement and a_email in LEGACY_UNCONFIGURED_ADMIN_EMAILS:
+                    continue  # Ignore legacy dummy template placeholder if replacing with an authentic administrator
                 return True
     return False
 
@@ -3420,24 +3430,22 @@ def _ensure_default_super_admin():
     Secure One-Time First-Super-Admin Provisioning.
     
     Safety Invariants:
-    1. If an active Super Admin already exists in the database, this function terminates immediately.
+    1. If an active authentic Super Admin already exists in the database, this function terminates immediately.
        It will NEVER overwrite credentials, change roles, or promote accounts on startup.
     2. No insecure hardcoded production passwords are ever used.
        If SUPER_ADMIN_EMAIL or SUPER_ADMIN_PASSWORD is missing or matches known insecure defaults,
        provisioning is skipped with a safe diagnostic log.
     3. Existing non-super-admin accounts are never silently promoted.
-    4. Passwords must pass strong validation (>= 10 chars) and are hashed with Werkzeug pbkdf2/scrypt.
-    5. Emails and credentials are never printed in plain text to logs.
+    4. If the legacy unconfigured template account (admin@smarthealth.io) exists, configuring a genuine
+       SUPER_ADMIN_EMAIL will provision the genuine administrator and safely deactivate the insecure placeholder.
+    5. Passwords must pass strong validation (>= 10 chars) and are hashed with Werkzeug pbkdf2/scrypt.
+    6. Emails and credentials are never printed in plain text to logs.
     """
     try:
         admin_ref = _admin_collection_reference()
         all_admins = admin_ref.get()
 
-        # 1. Guard against repeat provisioning or overwrite
-        if _has_active_super_admin(all_admins):
-            return
-
-        # 2. Read configured first-admin credentials from environment
+        # 1. Read configured first-admin credentials from environment
         raw_email = (
             os.getenv('INITIAL_ADMIN_EMAIL') or
             os.getenv('SUPER_ADMIN_EMAIL') or
@@ -3450,9 +3458,15 @@ def _ensure_default_super_admin():
             ''
         ).strip()
 
+        allow_placeholder_replace = bool(raw_email and raw_email not in LEGACY_UNCONFIGURED_ADMIN_EMAILS)
+
+        # 2. Guard against repeat provisioning or overwrite of an authentic super admin
+        if _has_active_super_admin(all_admins, allow_legacy_placeholder_replacement=allow_placeholder_replace):
+            return
+
         # 3. Guard against missing credentials (do NOT fallback to hardcoded default passwords!)
         if not raw_email or not raw_password:
-            print("[Auth] Info: No active Super Admin found. Configure INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD to complete initial setup.")
+            print("[Auth] Info: No authentic Super Admin found. Configure INITIAL_ADMIN_EMAIL and INITIAL_ADMIN_PASSWORD to complete initial setup.")
             return
 
         # 4. Guard against known insecure default passwords
@@ -3509,6 +3523,20 @@ def _ensure_default_super_admin():
         }
 
         admin_ref.child(sanitized_key).set(record)
+
+        # 9. Safely deactivate legacy placeholder if present
+        if isinstance(all_admins, dict):
+            for legacy_email in LEGACY_UNCONFIGURED_ADMIN_EMAILS:
+                legacy_key = legacy_email.replace('.', ',')
+                if legacy_key in all_admins and legacy_email != raw_email:
+                    admin_ref.child(legacy_key).update({
+                        'isActive': False,
+                        'status': 'deactivated',
+                        'deactivatedReason': 'Replaced by authorized initial Super Administrator bootstrap',
+                        'updatedAt': datetime.now(timezone.utc).isoformat(),
+                    })
+                    print(f"[Auth] Deactivated legacy unconfigured template account ({legacy_email}).")
+
         masked = _mask_email(raw_email)
         print(f"[Auth] Successfully provisioned initial Super Administrator ({masked}).")
     except Exception as e:
